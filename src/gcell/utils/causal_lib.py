@@ -204,7 +204,6 @@ def plotly_networkx_digraph(
                 thickness=15,
                 title="Mean TF Expression",
                 xanchor="left",
-                titleside="right",
             ),
         ),
     )

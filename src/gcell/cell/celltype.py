@@ -1798,7 +1798,7 @@ class GETHydraCellType(Celltype):
         if self.prediction_target != "exp":
             strand = 0
         jacobians = []
-        for i in indices:
+        for k, i in enumerate(indices):
             jacob = self._zarr_data["jacobians"][self.prediction_target][str(strand)][
                 "input"
             ]["region_motif"][i]
@@ -1806,12 +1806,15 @@ class GETHydraCellType(Celltype):
 
             if multiply_input:
                 jacob = jacob * input_data
-
+            start_idx = k * self.num_region_per_sample
+            end_idx = start_idx + self.num_region_per_sample
             jacobians.append(
                 OneGeneJacobian(
                     gene_name=gene_name,
                     data=jacob,
-                    region=self.peak_annot.query(f"Gene == '{gene_name}'"),
+                    region=self.peak_annot.query(f"Gene == '{gene_name}'").iloc[
+                        start_idx:end_idx
+                    ],
                     features=self.features,
                     num_cls=self.num_cls,
                     num_region_per_sample=self.num_region_per_sample,
