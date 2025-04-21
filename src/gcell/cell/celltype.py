@@ -1783,8 +1783,24 @@ class GETHydraCellType(Celltype):
 
         Parameters
         ----------
-        distances
-            The distances to the TSS.
+        distances : array-like
+            The distances to the TSS in base pairs.
+        min_distance : int, default=5000
+            Minimum distance threshold in base pairs. Distances below this value will be clipped to this value.
+
+        Returns
+        -------
+        numpy.ndarray
+            Powerlaw contact frequency values corresponding to the input distances.
+
+        Notes
+        -----
+        The powerlaw parameters are derived from K562 Hi-C data with:
+        - gamma = 1.024238616787792
+        - scale = 5.9594510043736655
+
+        For distances below min_distance (5kb), values are clipped as the model
+        doesn't accurately represent contact frequencies at short distances.
         """
         gamma = 1.024238616787792
         scale = 5.9594510043736655
@@ -1804,19 +1820,31 @@ class GETHydraCellType(Celltype):
         multiply_atac=True,
         layer="region_embed",
     ) -> list[pd.DataFrame]:
-        """Get jacobians l2 norm per region for all TSS of a gene.
+        """Get jacobians L2 norm per region for all TSS of a gene.
+
+        This method calculates the L2 norm of jacobians for each region associated with
+        a gene's transcription start sites (TSS), and combines this with distance-based
+        powerlaw contact frequency and ATAC-seq accessibility data.
 
         Parameters
         ----------
-        gene_name
-            The name of the gene.
-        multiply_atac
-            Whether to multiply the ATAC signal by the jacobian, by default True
+        gene_name : str
+            The name of the gene to analyze.
+        multiply_atac : bool, default=True
+            Whether to multiply the ATAC signal by the jacobian L2 norm.
+        layer : str, default="region_embed"
+            The neural network layer from which to extract jacobians.
 
         Returns
         -------
-        list
-            The jacobians for each TSS of the gene.
+        list[pd.DataFrame]
+            A list of DataFrames (one per TSS) containing:
+            - jacobian: L2 norm of the jacobian (optionally multiplied by ATAC signal)
+            - distance: distance from region to gene TSS
+            - powerlaw: Hi-C based contact frequency estimate
+            - ATAC: accessibility signal
+            - powerlaw_atac: product of powerlaw and ATAC signal
+            - final_prediction: sum of jacobian and powerlaw_atac
         """
         indices = self.get_gene_idx(gene_name)
         strand = self.get_gene_strand(gene_name)
