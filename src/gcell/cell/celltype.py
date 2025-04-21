@@ -210,6 +210,8 @@ class OneTSSJacobian:
             region_data = data.max(axis=1)
         elif stats == "absmean":
             region_data = data.abs().mean(axis=1)
+        elif stats == "l2_norm":
+            region_data = np.linalg.norm(data, axis=1)
         # if stats is a function
         elif callable(stats):
             region_data = data.apply(stats, axis=1)
@@ -1776,8 +1778,91 @@ class GETHydraCellType(Celltype):
         else:
             return v
 
+    def get_powerlaw_at_distance(self, distances, min_distance=5000):
+        """Get the powerlaw trained on k562 Hi-C data at a given distance.
+
+        Parameters
+        ----------
+        distances
+            The distances to the TSS.
+        """
+        gamma = 1.024238616787792
+        scale = 5.9594510043736655
+        # from https://github.com/broadinstitute/ABC-Enhancer-Gene-Prediction/blob/main/config/config.yaml
+        # The powerlaw is computed for distances > 5kb. We don't know what the contact freq looks like at < 5kb.
+        # So just assume that everything at < 5kb is equal to 5kb.
+        # TO DO: get more accurate powerlaw at < 5kb
+        distances = np.clip(distances, min_distance, np.Inf)
+        log_dists = np.log(distances + 1)
+
+        powerlaw_contact = np.exp(scale + -1 * gamma * log_dists)
+        return powerlaw_contact
+
+    def get_gene_jacobian_region_norm(
+        self,
+        gene_name: str,
+        multiply_atac=True,
+        layer="region_embed",
+    ) -> list[pd.DataFrame]:
+        """Get jacobians l2 norm per region for all TSS of a gene.
+
+        Parameters
+        ----------
+        gene_name
+            The name of the gene.
+        multiply_atac
+            Whether to multiply the ATAC signal by the jacobian, by default True
+
+        Returns
+        -------
+        list
+            The jacobians for each TSS of the gene.
+        """
+        indices = self.get_gene_idx(gene_name)
+        strand = self.get_gene_strand(gene_name)
+        if self.prediction_target != "exp":
+            strand = 0
+        jacobians = []
+        for k, i in enumerate(indices):
+            jacob = self._zarr_data["jacobians"][self.prediction_target][str(strand)][
+                layer
+            ][i]
+            input_data = self._zarr_data["input"][i]
+            atac_data = input_data[:, -1]
+            jacob_norm = np.linalg.norm(jacob, axis=1)
+            if multiply_atac:
+                jacob_norm = jacob_norm * atac_data
+            # convert to dataframe
+            start_idx = k * self.num_region_per_sample
+            end_idx = start_idx + self.num_region_per_sample
+            peaks_df = self.peak_annot.query(f"Gene == '{gene_name}'").iloc[
+                start_idx:end_idx
+            ]
+            jacob_norm = pd.DataFrame(
+                jacob_norm, index=peaks_df.index.values, columns=["jacobian"]
+            ).reset_index()
+            gene_tss_start = self.gene_annot.query(f"gene_name == '{gene_name}'")[
+                "Start"
+            ].values[0]
+            jacob_norm["distance"] = np.abs(peaks_df.Start.values - gene_tss_start)
+            jacob_norm["powerlaw"] = self.get_powerlaw_at_distance(
+                jacob_norm["distance"].values
+            )
+            jacob_norm["ATAC"] = atac_data
+            jacob_norm["powerlaw_atac"] = jacob_norm["powerlaw"] * jacob_norm["ATAC"]
+            jacob_norm["final_prediction"] = (
+                jacob_norm["jacobian"] + jacob_norm["powerlaw_atac"]
+            )
+            jacobians.append(jacob_norm)
+        return jacobians
+
     def get_gene_jacobian(
-        self, gene_name: str, multiply_input=True
+        self,
+        gene_name: str,
+        multiply_input=True,
+        multiply_atac=False,
+        layer="input/region_motif",
+        return_norm=False,
     ) -> list[OneGeneJacobian]:
         """Get jacobians for all TSS of a gene.
 
@@ -1800,12 +1885,17 @@ class GETHydraCellType(Celltype):
         jacobians = []
         for k, i in enumerate(indices):
             jacob = self._zarr_data["jacobians"][self.prediction_target][str(strand)][
-                "input"
-            ]["region_motif"][i]
+                layer
+            ][i]
             input_data = self._zarr_data["input"][i]
 
             if multiply_input:
                 jacob = jacob * input_data
+            if multiply_atac:
+                jacob = jacob * self._zarr_data["input"][i][:, :, -1]
+            if return_norm:
+                jacob = np.linalg.norm(jacob, axis=1)
+                return jacob
             start_idx = k * self.num_region_per_sample
             end_idx = start_idx + self.num_region_per_sample
             jacobians.append(
