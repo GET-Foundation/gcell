@@ -110,7 +110,7 @@ class Gene:
             The list of TSS objects.
         """
         return [
-            TSS(self.name, self.id, self.chrom, self.strand, start)
+            TSS(self.name, self.id, self.chrom, start, self.strand)
             for start in self.tss_list.Start.values
         ]
 
