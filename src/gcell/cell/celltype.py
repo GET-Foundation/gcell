@@ -1920,7 +1920,7 @@ class GETHydraCellType(Celltype):
             if multiply_input:
                 jacob = jacob * input_data
             if multiply_atac:
-                jacob = jacob * self._zarr_data["input"][i][:, :, -1]
+                jacob = jacob * self._zarr_data["input"][i][:, -1]
             if return_norm:
                 jacob = np.linalg.norm(jacob, axis=1)
                 return jacob
