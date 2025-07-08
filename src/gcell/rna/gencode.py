@@ -109,6 +109,16 @@ class Gencode(GTF):
             _settings.download_with_pooch(fname, url, target_dir="annotation_dir")
 
     @property
+    def original_gtf(self):
+        if hasattr(self, "_original_gtf"):
+            return self._original_gtf
+        else:
+            from .gtf import read_gtf
+
+            self._original_gtf = read_gtf(str(self.gtf_path)).as_df()
+            return self._original_gtf
+
+    @property
     def gene_to_strand(self):
         """Dict mapping gene names to their strand orientation ('+' or '-').
 

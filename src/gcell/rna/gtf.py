@@ -50,7 +50,7 @@ class GTF:
             The GTF data in a standardized format.
         """
         gtf_df = read_gtf(str(self.gtf_path)).as_df()
-
+        self._original_gtf = gtf_df
         # Process transcripts for positive and negative strands
         positive = gtf_df[(gtf_df.Feature == "transcript") & (gtf_df.Strand == "+")][
             [
