@@ -202,7 +202,7 @@ def plotly_networkx_digraph(
             size=node_sizes,
             colorbar=dict(
                 thickness=15,
-                title="Mean TF Expression",
+                title=dict(text="Mean TF Expression"),
                 xanchor="left",
             ),
         ),

@@ -116,16 +116,16 @@ class Gene:
 
     @property
     def genomic_range(
-        self, upstream=128 * 8192, downstream=128 * 8192
+        self,
     ) -> tuple[str, int, int, str]:
         return (
             self.chrom,
-            self.tss_list.Start.min() - upstream,
-            self.tss_list.Start.min() + downstream,
+            self.tss_list.Start.min(),
+            self.tss_list.Start.min(),
             self.strand,
         )
 
-    def get_track(self, track, upstream=128 * 8192, downstream=128 * 8192, **kwargs):
+    def get_track(self, track, upstream=1000, downstream=1000, **kwargs):
         return track.get_track(
             chr_name=self.chrom,
             start=self.tss_list.Start.min() - upstream,
@@ -149,9 +149,7 @@ class Gene:
                 **kwargs,
             )
 
-    def get_track_obj(
-        self, track, upstream=128 * 8192, downstream=128 * 8192, **kwargs
-    ) -> Track:
+    def get_track_obj(self, track, upstream=1000, downstream=1000, **kwargs) -> Track:
         return track.get_track_obj(
             chr_name=self.chrom,
             start=self.tss_list.Start.min() - upstream,
