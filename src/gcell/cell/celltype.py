@@ -1695,8 +1695,7 @@ class GETHydraCellType(Celltype):
         peak_coord = self._zarr_data["peak_coord"][:]
         input_data = self._zarr_data["input"][:]
         if self.prediction_target == "exp":
-            strands = np.array([self.gene2strand[x] for x in available_genes])
-
+            strands = self._zarr_data["strand"][:].flatten()
             # Get predictions and observations for all genes at once
             pred_values = np.array(
                 [
