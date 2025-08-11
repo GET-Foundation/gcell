@@ -1700,14 +1700,16 @@ class GETHydraCellType(Celltype):
             pred_values = np.array(
                 [
                     self._zarr_data["preds"][self.prediction_target][
-                        i, focus_idx, strand
+                        i, focus_idx, int(strand)
                     ]
                     for i, strand in enumerate(strands)
                 ]
             )
             obs_values = np.array(
                 [
-                    self._zarr_data["obs"][self.prediction_target][i, focus_idx, strand]
+                    self._zarr_data["obs"][self.prediction_target][
+                        i, focus_idx, int(strand)
+                    ]
                     for i, strand in enumerate(strands)
                 ]
             )
