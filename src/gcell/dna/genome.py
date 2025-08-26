@@ -328,15 +328,21 @@ class Genome:
         Normalize chromosome name format
     """
 
-    def __init__(self, assembly: str) -> None:
+    def __init__(self, assembly: str, load_genome_seq: bool = True) -> None:
         self.assembly = assembly
-        self._download_files_if_not_exist()
-        fasta_file = Path(_settings.get_setting("genome_dir")) / f"{self.assembly}.fa"
-        self.genome_seq = Fasta(str(fasta_file))
+        self._download_files_if_not_exist(load_genome_seq)
+        if load_genome_seq:
+            fasta_file = (
+                Path(_settings.get_setting("genome_dir")) / f"{self.assembly}.fa"
+            )
+            self.genome_seq = Fasta(str(fasta_file))
 
-        if list(self.genome_seq.keys())[0].startswith("chr"):
-            self.chr_suffix = "chr"
+            if list(self.genome_seq.keys())[0].startswith("chr"):
+                self.chr_suffix = "chr"
+            else:
+                self.chr_suffix = ""
         else:
+            self.genome_seq = None
             self.chr_suffix = ""
 
     @property
@@ -370,29 +376,36 @@ class Genome:
         else:
             return pd.DataFrame()
 
-    def _download_files_if_not_exist(self) -> None:
+    def _download_files_if_not_exist(self, download_genome_seq: bool = True) -> None:
         """Download genome files if they don't exist. This will download:
         - genome sequence
         - chromosome sizes
         - chromosome gap
         - blacklist
         """
-        fasta_file = Path(_settings.get_setting("genome_dir")) / f"{self.assembly}.fa"
-        if not fasta_file.exists():
-            # Define file name and URL
-            fname = f"{self.assembly}.fa.gz"
-            url = f"http://hgdownload.cse.ucsc.edu/goldenPath/{self.assembly}/bigZips/{self.assembly}.fa.gz"
+        if download_genome_seq:
+            fasta_file = (
+                Path(_settings.get_setting("genome_dir")) / f"{self.assembly}.fa"
+            )
+            if not fasta_file.exists():
+                # Define file name and URL
+                fname = f"{self.assembly}.fa.gz"
+                url = f"http://hgdownload.cse.ucsc.edu/goldenPath/{self.assembly}/bigZips/{self.assembly}.fa.gz"
 
-            # Register the file with pooch
-            _settings.POOCH.path = Path(_settings.get_setting("genome_dir"))
-            _settings.POOCH.registry[fname] = None  # Will be updated with hash later
-            _settings.POOCH.urls[fname] = url
+                # Register the file with pooch
+                _settings.POOCH.path = Path(_settings.get_setting("genome_dir"))
+                _settings.POOCH.registry[fname] = (
+                    None  # Will be updated with hash later
+                )
+                _settings.POOCH.urls[fname] = url
 
-            # Download and decompress the file
-            downloaded_file = _settings.POOCH.fetch(fname, processor=pooch.Decompress())
+                # Download and decompress the file
+                downloaded_file = _settings.POOCH.fetch(
+                    fname, processor=pooch.Decompress()
+                )
 
-            # Move to final location
-            Path(downloaded_file).rename(fasta_file)
+                # Move to final location
+                Path(downloaded_file).rename(fasta_file)
 
         chrom_sizes_file = str(
             Path(_settings.get_setting("annotation_dir"))
@@ -487,6 +500,10 @@ class Genome:
         strand : str, optional
             The strand ('+' or '-'), defaults to '+'
         """
+        if self.genome_seq is None:
+            raise ValueError(
+                "Genome sequence is not loaded, please set load_genome_seq=True when initializing the Genome object"
+            )
         chromosome = self.normalize_chromosome(chromosome)
         if end > self.chrom_sizes[chromosome]:
             end = self.chrom_sizes[chromosome]
@@ -524,6 +541,10 @@ class Genome:
         strand : str, optional
             The strand ('+' or '-'), defaults to '+'
         """
+        if self.genome_seq is None:
+            raise ValueError(
+                "Genome sequence is not loaded, please set load_genome_seq=True when initializing the Genome object"
+            )
         chromosome = self.normalize_chromosome(chromosome)
         start = np.random.randint(0, len(self.genome_seq[chromosome]) - length)
         return GenomicRegion(self, chromosome, start, start + length, strand)
