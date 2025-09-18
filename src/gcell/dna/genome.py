@@ -243,7 +243,9 @@ class ChromGap:
             "component_end",
             "orientation",
         ]
-        return pd.read_csv(StringIO(data), sep="\t", comment="#", names=columns)
+        return pd.read_csv(StringIO(data), sep="\t", comment="#", names=columns).rename(
+            columns={"chrom": "Chromosome", "start": "Start", "end": "End"}
+        )
 
     def get_telomeres(self, return_tabix=False):
         """
@@ -269,7 +271,9 @@ class ChromGap:
             Whether to return the regions in tabix format string (i.e. "chr1:100-200"), defaults to False
         """
         df = self.agp_data[
-            self.agp_data["component_start"].isin(["heterochromatin", "centromere"])
+            self.agp_data["component_start"].isin(
+                ["heterochromatin", "centromere", "telomere"]
+            )
         ]
         if return_tabix:
             return pandas_to_tabix_region(df)
@@ -375,6 +379,13 @@ class Genome:
             )
         else:
             return pd.DataFrame()
+
+    @property
+    def modeling_blacklist(self) -> pd.DataFrame:
+        """Concat heterochromatin, blacklist if exists"""
+        return pd.concat([self.chrom_gap.get_heterochromatin(), self.blacklist])[
+            ["Chromosome", "Start", "End"]
+        ]
 
     def _download_files_if_not_exist(self, download_genome_seq: bool = True) -> None:
         """Download genome files if they don't exist. This will download:
