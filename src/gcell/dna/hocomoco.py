@@ -17,9 +17,11 @@ import torch
 from gcell._settings import get_setting
 
 from .motif_utils import (
+    compute_pvalue_mapping,
     create_reverse_complement_motifs,
     filter_motifs,
     pad_motifs_to_same_length,
+    pvalue_from_logpdf,
     read_annotations,
     read_pwms,
 )
@@ -70,6 +72,10 @@ class HocomocoIO:
         if not annotation_path:
             self.annotation_path = str(base_dir / "H13CORE_annotation.jsonl")
 
+        # P-value mapping cache directory
+        self._pvalue_cache_dir = base_dir / "pvalue_mappings"
+        self._pvalue_cache_dir.mkdir(parents=True, exist_ok=True)
+
         # Cached data
         self._motif_names: list[str] | None = None
         self._motif_kernels: torch.Tensor | None = None
@@ -78,6 +84,7 @@ class HocomocoIO:
         self._significance_thresholds: dict | None = None
         self._loaded_with_aligned: bool | None = None
         self._tf_name_mapping: dict[str, str] | None = None
+        self._pvalue_mappings: dict[str, tuple[int, np.ndarray, float]] | None = None
 
     @property
     def motif_names(self) -> list[str]:
@@ -802,6 +809,221 @@ class HocomocoIO:
     def __len__(self) -> int:
         """Get number of motifs."""
         return len(self.motif_names)
+
+    def _get_pvalue_mapping_cache_path(self, motif_name: str) -> Path:
+        """Get cache path for a motif's p-value mapping."""
+        # Sanitize motif name for filesystem
+        safe_name = motif_name.replace("/", "_").replace("\\", "_").replace(":", "_")
+        return self._pvalue_cache_dir / f"{safe_name}.npz"
+
+    def _load_pvalue_mappings(self):
+        """Load or compute p-value mappings for all motifs."""
+        if self._pvalue_mappings is not None:
+            return
+
+        logger.info("Loading p-value mappings for motifs")
+        motif_names = self.motif_names
+        self._pvalue_mappings = {}
+
+        # Load raw PWMs
+        motif_collection = read_pwms(self.pwm_path)
+
+        for motif_name in motif_names:
+            # Handle RC motifs - use the original motif for mapping
+            original_name = motif_name
+            if motif_name.endswith("_RC"):
+                original_name = motif_name[:-3]
+
+            cache_path = self._get_pvalue_mapping_cache_path(original_name)
+
+            # Try to load from cache
+            if cache_path.exists():
+                try:
+                    cached_data = np.load(cache_path)
+                    smallest = int(cached_data["smallest"])
+                    logpdf = cached_data["logpdf"]
+                    bin_size = float(cached_data["bin_size"])
+                    self._pvalue_mappings[motif_name] = (smallest, logpdf, bin_size)
+                    continue
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to load cached p-value mapping for {motif_name}: {e}"
+                    )
+
+            # Compute mapping if not cached or cache failed
+            if original_name in motif_collection:
+                pwm = motif_collection[original_name]
+                try:
+                    smallest, logpdf, bin_size = compute_pvalue_mapping(pwm)
+                    self._pvalue_mappings[motif_name] = (smallest, logpdf, bin_size)
+
+                    # Cache the result
+                    np.savez(
+                        cache_path,
+                        smallest=smallest,
+                        logpdf=logpdf,
+                        bin_size=bin_size,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to compute p-value mapping for {motif_name}: {e}"
+                    )
+            else:
+                logger.warning(
+                    f"Motif {original_name} not found in PWM collection for p-value mapping"
+                )
+
+        logger.info(f"Loaded p-value mappings for {len(self._pvalue_mappings)} motifs")
+
+    @property
+    def pvalue_mappings(self) -> dict[str, tuple[int, np.ndarray, float]]:
+        """Get p-value mappings for all motifs."""
+        if self._pvalue_mappings is None:
+            self._load_pvalue_mappings()
+        return self._pvalue_mappings
+
+    def get_score_threshold_for_pvalue(
+        self, p_value: float, motif_indices: list[int] | None = None
+    ) -> torch.Tensor:
+        """
+        Get score thresholds for a given p-value.
+
+        Args:
+            p_value: Desired p-value threshold (e.g., 0.0001)
+            motif_indices: Optional list of motif indices to get thresholds for.
+                          If None, returns thresholds for all motifs.
+
+        Returns:
+            Tensor of score thresholds with shape (n_motifs,)
+        """
+        mappings = self.pvalue_mappings
+        motif_names = self.motif_names
+
+        if motif_indices is None:
+            motif_indices = list(range(len(motif_names)))
+
+        thresholds = []
+        log_pvalue = np.log2(p_value)
+
+        for idx in motif_indices:
+            if idx >= len(motif_names):
+                thresholds.append(float("-inf"))
+                continue
+
+            motif_name = motif_names[idx]
+            if motif_name not in mappings:
+                # Fallback to old threshold system if available
+                if (
+                    self.significance_thresholds
+                    and "p0.0001" in self.significance_thresholds
+                ):
+                    thresholds.append(
+                        float(self.significance_thresholds["p0.0001"][idx])
+                    )
+                else:
+                    thresholds.append(float("-inf"))
+                continue
+
+            smallest, logpdf, bin_size = mappings[motif_name]
+
+            # Find the score threshold: find where logpdf <= log_pvalue
+            # logpdf is in descending order (cumulative from right)
+            threshold_idx = np.searchsorted(-logpdf, -log_pvalue, side="right")
+            threshold_idx = max(0, min(threshold_idx, len(logpdf) - 1))
+
+            # Convert index back to score
+            score_threshold = (threshold_idx + smallest) * bin_size
+            thresholds.append(score_threshold)
+
+        return torch.tensor(thresholds, dtype=torch.float32)
+
+    def scores_to_pvalues(
+        self, scores: torch.Tensor, motif_indices: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        """
+        Convert motif scores to p-values.
+
+        Args:
+            scores: Tensor of scores with shape (n_positions,) or (n_motifs, n_positions)
+                   or (batch, n_motifs, n_positions)
+            motif_indices: Optional tensor of motif indices. If scores is 2D or 3D,
+                          should have shape (n_motifs,) indicating which motif each
+                          dimension corresponds to.
+
+        Returns:
+            Tensor of p-values with same shape as scores
+        """
+        mappings = self.pvalue_mappings
+        motif_names = self.motif_names
+
+        scores_np = scores.cpu().numpy()
+        original_shape = scores_np.shape
+
+        # Handle different input shapes
+        if scores_np.ndim == 1:
+            # Single motif, single position or single motif multiple positions
+            if motif_indices is None:
+                motif_idx = 0
+            else:
+                motif_idx = int(
+                    motif_indices.item()
+                    if motif_indices.numel() == 1
+                    else motif_indices[0]
+                )
+
+            motif_name = motif_names[motif_idx]
+            if motif_name in mappings:
+                smallest, logpdf, bin_size = mappings[motif_name]
+                pvalues_np = pvalue_from_logpdf(scores_np, smallest, logpdf, bin_size)
+            else:
+                pvalues_np = np.full_like(scores_np, 1.0)  # Default to non-significant
+        else:
+            # Multi-dimensional case
+            if scores_np.ndim == 2:
+                n_motifs, n_positions = scores_np.shape
+                pvalues_np = np.zeros_like(scores_np)
+
+                for i in range(n_motifs):
+                    if motif_indices is not None:
+                        motif_idx = int(motif_indices[i].item())
+                    else:
+                        motif_idx = i
+
+                    motif_name = (
+                        motif_names[motif_idx] if motif_idx < len(motif_names) else None
+                    )
+                    if motif_name and motif_name in mappings:
+                        smallest, logpdf, bin_size = mappings[motif_name]
+                        pvalues_np[i] = pvalue_from_logpdf(
+                            scores_np[i], smallest, logpdf, bin_size
+                        )
+                    else:
+                        pvalues_np[i] = 1.0
+            else:  # ndim == 3
+                batch_size, n_motifs, n_positions = scores_np.shape
+                pvalues_np = np.zeros_like(scores_np)
+
+                for b in range(batch_size):
+                    for i in range(n_motifs):
+                        if motif_indices is not None:
+                            motif_idx = int(motif_indices[i].item())
+                        else:
+                            motif_idx = i
+
+                        motif_name = (
+                            motif_names[motif_idx]
+                            if motif_idx < len(motif_names)
+                            else None
+                        )
+                        if motif_name and motif_name in mappings:
+                            smallest, logpdf, bin_size = mappings[motif_name]
+                            pvalues_np[b, i] = pvalue_from_logpdf(
+                                scores_np[b, i], smallest, logpdf, bin_size
+                            )
+                        else:
+                            pvalues_np[b, i] = 1.0
+
+        return torch.from_numpy(pvalues_np).to(scores.device).to(scores.dtype)
 
     def __repr__(self) -> str:
         """String representation."""
