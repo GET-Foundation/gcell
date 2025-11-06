@@ -1658,6 +1658,7 @@ class GETHydraCellType(Celltype):
         self.assets_dir = "assets/"  # Default value, could be made configurable
         self.s3_file_sys = None  # Default value, could be made configurable
         self.prediction_target = prediction_target
+
         self._load_zarr_data()
 
         # Initialize parent class attributes
@@ -1744,6 +1745,28 @@ class GETHydraCellType(Celltype):
                 "Gene": np.repeat(self.genelist, self.num_region_per_sample),
             }
         ).reset_index()
+
+    def load_gene_annot(self):
+        """Override parent method - not needed for GETHydraCellType.
+
+        GETHydraCellType creates gene annotations directly from zarr data in
+        `_process_data()`, which is called during initialization. The gene annotation
+        is already available in `self.gene_annot`.
+
+        If you need to access gene annotations, use `self.gene_annot` directly.
+        If you need strand information for a gene, use `self.get_gene_strand(gene_name)`.
+
+        Raises
+        ------
+        NotImplementedError
+            Always raises to indicate this method is not applicable for GETHydraCellType.
+        """
+        raise NotImplementedError(
+            "load_gene_annot() is not needed for GETHydraCellType. "
+            "Gene annotations are automatically created from zarr data during initialization. "
+            "Access them via `self.gene_annot` or use `self.get_gene_strand(gene_name)` "
+            "to get strand information for a specific gene."
+        )
 
     def get_gene_idx(self, gene_name: str) -> np.ndarray:
         """Get all indices for a given gene name.
