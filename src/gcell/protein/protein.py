@@ -348,20 +348,20 @@ class Protein:
                 url = (
                     "https://alphafold.ebi.ac.uk/files/AF-"
                     + self.uniprot_id
-                    + "-F1-model_v4.pdb"
+                    + "-F1-model_v6.pdb"
                 )
                 urllib.request.urlretrieve(
                     url,
                     f"{af2_folder}/structures/AF-"
                     + self.uniprot_id
-                    + "-F1-model_v4.pdb",
+                    + "-F1-model_v6.pdb",
                 )
 
-                # https://alphafold.ebi.ac.uk/files/AF-Q02548-F1-model_v4.pdb
+                # https://alphafold.ebi.ac.uk/files/AF-Q02548-F1-model_v6.pdb
                 with Path(
                     f"{af2_folder}/structures/AF-"
                     + self.uniprot_id
-                    + "-F1-model_v4.pdb"
+                    + "-F1-model_v6.pdb"
                 ).open() as f:
                     structure = bioparser.get_structure("monomer", f)
                 model = structure[0]

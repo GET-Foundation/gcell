@@ -51,7 +51,7 @@ dependencies = [
     "tqdm",
     "xmlschema",
     "zarr<3",
-    "nglview",
+    "nglview<4",
     "py3Dmol",
 ]
 dynamic = ["version"]
