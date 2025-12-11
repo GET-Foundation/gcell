@@ -1093,7 +1093,7 @@ class Celltype:
                         self._gene_by_motif.get_corr().values,
                         dtype="float32",
                     )
-
+        self._gene_by_motif.data.set_index(self.gene_annot.gene_name, inplace=True)
         return self._gene_by_motif
 
     def get_tf_pathway(
