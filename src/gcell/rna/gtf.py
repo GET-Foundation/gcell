@@ -118,7 +118,12 @@ class GTF:
             The Gene object.
         """
         df = self.gtf[self.gtf.gene_name == gene_name]
-        
+
+        # Calculate full gene body coordinates from original GTF (all features)
+        # This represents the true genomic range of the gene
+        gene_start = df.Start.min()
+        gene_end = df.End.max()
+
         # Construct tss_list (using Start column)
         tss_list = df[
             [
@@ -131,7 +136,7 @@ class GTF:
                 "gene_type",
             ]
         ]
-        
+
         # Construct tes_list (using End for '+' strand, Start for '-' strand)
         strand = df.Strand.iloc[0]
         if strand == "+":
@@ -143,7 +148,7 @@ class GTF:
         else:
             # Unstranded - use End as fallback
             tes_coords = df.End.values
-        
+
         tes_list = pd.DataFrame({
             'Chromosome': df.Chromosome.values,
             'Start': tes_coords,
@@ -153,7 +158,7 @@ class GTF:
             'gene_id': df.gene_id.values,
             'gene_type': df.gene_type.values if 'gene_type' in df.columns else [None] * len(tes_coords),
         })
-        
+
         return Gene(
             name=df.gene_name.iloc[0],
             id=df.gene_id.iloc[0],
@@ -161,6 +166,8 @@ class GTF:
             strand=strand,
             tss_list=tss_list,
             tes_list=tes_list,
+            gene_start=gene_start,
+            gene_end=gene_end,
         )
 
     def get_genes(self, gene_names) -> GeneSets:
@@ -192,7 +199,12 @@ class GTF:
             The Gene object.
         """
         df = self.gtf[self.gtf.gene_id.str.startswith(gene_id)]
-        
+
+        # Calculate full gene body coordinates from original GTF (all features)
+        # This represents the true genomic range of the gene
+        gene_start = df.Start.min()
+        gene_end = df.End.max()
+
         # Construct tss_list (using Start column)
         tss_list = df[
             [
@@ -205,7 +217,7 @@ class GTF:
                 "gene_type",
             ]
         ]
-        
+
         # Construct tes_list (using End for '+' strand, Start for '-' strand)
         strand = df.Strand.iloc[0]
         if strand == "+":
@@ -217,7 +229,7 @@ class GTF:
         else:
             # Unstranded - use End as fallback
             tes_coords = df.End.values
-        
+
         tes_list = pd.DataFrame({
             'Chromosome': df.Chromosome.values,
             'Start': tes_coords,
@@ -227,7 +239,7 @@ class GTF:
             'gene_id': df.gene_id.values,
             'gene_type': df.gene_type.values if 'gene_type' in df.columns else [None] * len(tes_coords),
         })
-        
+
         return Gene(
             name=df.gene_name.iloc[0],
             id=df.gene_id.iloc[0],
@@ -235,6 +247,8 @@ class GTF:
             strand=strand,
             tss_list=tss_list,
             tes_list=tes_list,
+            gene_start=gene_start,
+            gene_end=gene_end,
         )
 
     def get_genebodies(self, gene_names=None) -> pd.DataFrame:

@@ -68,7 +68,7 @@ class TSS:
 class Gene:
     """A class to represent a gene with TSS information."""
 
-    def __init__(self, name, id, chrom, strand, tss_list, tes_list=None) -> None:
+    def __init__(self, name, id, chrom, strand, tss_list, tes_list=None, gene_start=None, gene_end=None) -> None:
         """Initialize the Gene class.
 
         Parameters
@@ -87,6 +87,14 @@ class Gene:
             Optional TES list of the gene (DataFrame with Start and End columns).
             If not provided, will be constructed from tss_list on first access.
             For backward compatibility, defaults to None.
+        gene_start
+            Optional gene start coordinate from original GTF (full gene body).
+            If not provided, will be calculated from tss_list as fallback.
+            Defaults to None.
+        gene_end
+            Optional gene end coordinate from original GTF (full gene body).
+            If not provided, will be calculated from tss_list as fallback.
+            Defaults to None.
         """
         self.name = name
         self.id = id
@@ -95,6 +103,8 @@ class Gene:
 
         self.tss_list = tss_list
         self._tes_list = tes_list  # Can be provided or constructed on first access
+        self._gene_start = gene_start
+        self._gene_end = gene_end
 
     def __repr__(self) -> str:
         return "Gene(name={}, id={}, chrom={}, strand={}, tss_list={})".format(
@@ -217,11 +227,23 @@ class Gene:
     ) -> tuple[str, int, int, str]:
         """Get the genomic range of the gene (start, end coordinates).
 
+        Uses the full gene body coordinates from the original GTF if available,
+        otherwise falls back to calculating from tss_list.
+
         Returns
         -------
         tuple[str, int, int, str]
             (chromosome, start, end, strand)
         """
+        # Use stored gene_start/gene_end from original GTF if available
+        if self._gene_start is not None and self._gene_end is not None:
+            return (
+                self.chrom,
+                self._gene_start,
+                self._gene_end,
+                self.strand,
+            )
+        # Fallback to tss_list (for backward compatibility)
         return (
             self.chrom,
             self.tss_list.Start.min(),
@@ -369,7 +391,7 @@ class Gene:
 class GeneExp(Gene):
     """A class to represent a gene with expression data. Not very useful."""
 
-    def __init__(self, name, id, chrom, strand, tss_list, exp_list, tes_list=None) -> None:
+    def __init__(self, name, id, chrom, strand, tss_list, exp_list, tes_list=None, gene_start=None, gene_end=None) -> None:
         """Initialize the GeneExp class.
 
         Parameters
@@ -389,8 +411,14 @@ class GeneExp(Gene):
         tes_list : pd.DataFrame, optional
             Optional TES list of the gene. If not provided, will be constructed
             from tss_list on first access. Defaults to None.
+        gene_start : int, optional
+            Optional gene start coordinate from original GTF (full gene body).
+            Defaults to None.
+        gene_end : int, optional
+            Optional gene end coordinate from original GTF (full gene body).
+            Defaults to None.
         """
-        super().__init__(name, id, chrom, strand, tss_list, tes_list=tes_list)
+        super().__init__(name, id, chrom, strand, tss_list, tes_list=tes_list, gene_start=gene_start, gene_end=gene_end)
         self.exp_list = exp_list
 
     def __repr__(self) -> str:
