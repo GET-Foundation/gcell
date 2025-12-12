@@ -169,17 +169,36 @@ class Gencode(GTF):
     def gene_to_tss(self):
         """Dict mapping gene names to their transcription start sites (TSS).
 
+        For '+' strand genes, TSS is at Start coordinate.
+        For '-' strand genes, TSS is at End coordinate.
+
         Returns:
             dict: Dictionary with gene names as keys and TSS positions as values
         """
-        return self.gtf.set_index("gene_name")["Start"].to_dict()
+        # Group by gene_name and calculate TSS based on strand
+        gene_groups = self.gtf.groupby("gene_name")
+        tss_dict = {}
+
+        for gene_name, group in gene_groups:
+            strand = group["Strand"].iloc[0]
+            if strand == "+":
+                # For '+' strand, TSS is at Start coordinate
+                tss_dict[gene_name] = group["Start"].min()
+            elif strand == "-":
+                # For '-' strand, TSS is at End coordinate
+                tss_dict[gene_name] = group["End"].max()
+            else:
+                # Unstranded case - use Start.min() as fallback
+                tss_dict[gene_name] = group["Start"].min()
+
+        return tss_dict
 
     @property
     def gene_to_tes(self):
         """Dict mapping gene names to their transcription end sites (TES).
 
-        For '+' strand genes, TES is the maximum End coordinate of the gene body.
-        For '-' strand genes, TES is the minimum Start coordinate of the gene body.
+        For '+' strand genes, TES is at the maximum End coordinate.
+        For '-' strand genes, TES is at the minimum Start coordinate.
 
         Returns:
             dict: Dictionary with gene names as keys and TES positions as values

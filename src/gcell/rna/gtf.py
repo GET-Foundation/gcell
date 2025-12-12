@@ -51,23 +51,11 @@ class GTF:
         """
         gtf_df = read_gtf(str(self.gtf_path)).as_df()
         self._original_gtf = gtf_df
-        # Process transcripts for positive and negative strands
-        positive = gtf_df[(gtf_df.Feature == "transcript") & (gtf_df.Strand == "+")][
+        # Filter to transcript features only (keep original Start/End coordinates)
+        gtf_df = gtf_df[gtf_df.Feature == "transcript"][
             [
                 "Chromosome",
                 "Start",
-                "Start",
-                "Strand",
-                "gene_name",
-                "gene_id",
-                "gene_type",
-                "transcript_id",
-            ]
-        ]
-        negative = gtf_df[(gtf_df.Feature == "transcript") & (gtf_df.Strand == "-")][
-            [
-                "Chromosome",
-                "End",
                 "End",
                 "Strand",
                 "gene_name",
@@ -75,22 +63,7 @@ class GTF:
                 "gene_type",
                 "transcript_id",
             ]
-        ]
-
-        columns = [
-            "Chromosome",
-            "Start",
-            "End",
-            "Strand",
-            "gene_name",
-            "gene_id",
-            "gene_type",
-            "transcript_id",
-        ]
-        positive.columns = columns
-        negative.columns = columns
-
-        gtf_df = pd.concat([positive, negative], axis=0).drop_duplicates().reset_index()
+        ].drop_duplicates().reset_index(drop=True)
         gtf_df["gene_id"] = gtf_df.gene_id.str.split(".").str[0]
 
         # Filter excluded chromosomes
@@ -119,27 +92,7 @@ class GTF:
         """
         df = self.gtf[self.gtf.gene_name == gene_name]
 
-        # Calculate full gene body coordinates from original GTF (all features)
-        # This represents the true genomic range of the gene
-        gene_start = df.Start.min()
-        gene_end = df.End.max()
-
-        # Construct tss_list (using Start column)
-        tss_list = df[
-            [
-                "Chromosome",
-                "Start",
-                "End",
-                "Strand",
-                "gene_name",
-                "gene_id",
-                "gene_type",
-            ]
-        ].reset_index(drop=True)
-
-        # Construct tes_list using original GTF data (not processed gtf)
-        # The processed gtf has End=Start for '+' strand and Start=End for '-' strand
-        # which is correct for TSS but wrong for TES
+        # Get access to original GTF data (works for both Gencode and GTF classes)
         # Use original_gtf property (works for Gencode) or _original_gtf attribute (works for GTF)
         try:
             # Try property first (works for Gencode class)
@@ -152,26 +105,48 @@ class GTF:
                 raise AttributeError(
                     "Cannot access original GTF data. Need either 'original_gtf' property (Gencode) or '_original_gtf' attribute (GTF)."
                 )
-        original_df = original_gtf_df[original_gtf_df.gene_name == gene_name]
-        original_df = original_df[original_df.Feature == "transcript"]  # Use transcript features
 
-        # Match transcripts by transcript_id to ensure correct order
-        # Create a mapping from transcript_id to TES coordinate
-        original_df_indexed = original_df.set_index('transcript_id')
+        # Get all features for this gene from original GTF
+        gene_original_df = original_gtf_df[original_gtf_df.gene_name == gene_name]
+
+        # Calculate full gene body coordinates from original GTF (all features)
+        # This represents the true genomic range of the gene (includes TSS and TES regions)
+        # Works correctly for both strands:
+        #   '+' strand: Start.min() = TSS region, End.max() = TES region
+        #   '-' strand: Start.min() = TES region, End.max() = TSS region
+        # Both give the full gene body span from first to last feature
+        gene_start = gene_original_df.Start.min()
+        gene_end = gene_original_df.End.max()
+
+        # Construct tss_list from processed gtf (now has original Start/End)
+        # TSS coordinates: '+' strand uses Start, '-' strand uses End
         strand = df.Strand.iloc[0]
-
         if strand == "+":
-            # For '+' strand, TES is at End coordinates from original GTF
-            tes_dict = original_df_indexed.End.to_dict()
+            tss_coords = df.Start.values
         elif strand == "-":
-            # For '-' strand, TES is at Start coordinates from original GTF
-            tes_dict = original_df_indexed.Start.to_dict()
+            tss_coords = df.End.values
         else:
-            # Unstranded - use End as fallback
-            tes_dict = original_df_indexed.End.to_dict()
+            tss_coords = df.Start.values  # Fallback
 
-        # Get TES coordinates in the same order as df (which has transcript_id)
-        tes_coords = df.transcript_id.map(tes_dict).values
+        tss_list = pd.DataFrame({
+            'Chromosome': df.Chromosome.values,
+            'Start': tss_coords,
+            'End': tss_coords,  # TSS is a single coordinate
+            'Strand': df.Strand.values,
+            'gene_name': df.gene_name.values,
+            'gene_id': df.gene_id.values,
+            'gene_type': df.gene_type.values if 'gene_type' in df.columns else [None] * len(tss_coords),
+            'transcript_id': df.transcript_id.values if 'transcript_id' in df.columns else [None] * len(tss_coords),
+        }).reset_index(drop=True)
+
+        # Construct tes_list from processed gtf (now has original Start/End)
+        # TES coordinates: '+' strand uses End, '-' strand uses Start
+        if strand == "+":
+            tes_coords = df.End.values
+        elif strand == "-":
+            tes_coords = df.Start.values
+        else:
+            tes_coords = df.End.values  # Fallback
 
         tes_list = pd.DataFrame({
             'Chromosome': df.Chromosome.values,
@@ -224,27 +199,7 @@ class GTF:
         """
         df = self.gtf[self.gtf.gene_id.str.startswith(gene_id)]
 
-        # Calculate full gene body coordinates from original GTF (all features)
-        # This represents the true genomic range of the gene
-        gene_start = df.Start.min()
-        gene_end = df.End.max()
-
-        # Construct tss_list (using Start column)
-        tss_list = df[
-            [
-                "Chromosome",
-                "Start",
-                "End",
-                "Strand",
-                "gene_name",
-                "gene_id",
-                "gene_type",
-            ]
-        ].reset_index(drop=True)
-
-        # Construct tes_list using original GTF data (not processed gtf)
-        # The processed gtf has End=Start for '+' strand and Start=End for '-' strand
-        # which is correct for TSS but wrong for TES
+        # Get access to original GTF data (works for both Gencode and GTF classes)
         # Use original_gtf property (works for Gencode) or _original_gtf attribute (works for GTF)
         try:
             # Try property first (works for Gencode class)
@@ -257,26 +212,48 @@ class GTF:
                 raise AttributeError(
                     "Cannot access original GTF data. Need either 'original_gtf' property (Gencode) or '_original_gtf' attribute (GTF)."
                 )
-        original_df = original_gtf_df[original_gtf_df.gene_id.str.startswith(gene_id)]
-        original_df = original_df[original_df.Feature == "transcript"]  # Use transcript features
 
-        # Match transcripts by transcript_id to ensure correct order
-        # Create a mapping from transcript_id to TES coordinate
-        original_df_indexed = original_df.set_index('transcript_id')
+        # Get all features for this gene from original GTF
+        gene_original_df = original_gtf_df[original_gtf_df.gene_id.str.startswith(gene_id)]
+
+        # Calculate full gene body coordinates from original GTF (all features)
+        # This represents the true genomic range of the gene (includes TSS and TES regions)
+        # Works correctly for both strands:
+        #   '+' strand: Start.min() = TSS region, End.max() = TES region
+        #   '-' strand: Start.min() = TES region, End.max() = TSS region
+        # Both give the full gene body span from first to last feature
+        gene_start = gene_original_df.Start.min()
+        gene_end = gene_original_df.End.max()
+
+        # Construct tss_list from processed gtf (now has original Start/End)
+        # TSS coordinates: '+' strand uses Start, '-' strand uses End
         strand = df.Strand.iloc[0]
-
         if strand == "+":
-            # For '+' strand, TES is at End coordinates from original GTF
-            tes_dict = original_df_indexed.End.to_dict()
+            tss_coords = df.Start.values
         elif strand == "-":
-            # For '-' strand, TES is at Start coordinates from original GTF
-            tes_dict = original_df_indexed.Start.to_dict()
+            tss_coords = df.End.values
         else:
-            # Unstranded - use End as fallback
-            tes_dict = original_df_indexed.End.to_dict()
+            tss_coords = df.Start.values  # Fallback
 
-        # Get TES coordinates in the same order as df (which has transcript_id)
-        tes_coords = df.transcript_id.map(tes_dict).values
+        tss_list = pd.DataFrame({
+            'Chromosome': df.Chromosome.values,
+            'Start': tss_coords,
+            'End': tss_coords,  # TSS is a single coordinate
+            'Strand': df.Strand.values,
+            'gene_name': df.gene_name.values,
+            'gene_id': df.gene_id.values,
+            'gene_type': df.gene_type.values if 'gene_type' in df.columns else [None] * len(tss_coords),
+            'transcript_id': df.transcript_id.values if 'transcript_id' in df.columns else [None] * len(tss_coords),
+        }).reset_index(drop=True)
+
+        # Construct tes_list from processed gtf (now has original Start/End)
+        # TES coordinates: '+' strand uses End, '-' strand uses Start
+        if strand == "+":
+            tes_coords = df.End.values
+        elif strand == "-":
+            tes_coords = df.Start.values
+        else:
+            tes_coords = df.End.values  # Fallback
 
         tes_list = pd.DataFrame({
             'Chromosome': df.Chromosome.values,
