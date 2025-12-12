@@ -68,7 +68,7 @@ class TSS:
 class Gene:
     """A class to represent a gene with TSS information."""
 
-    def __init__(self, name, id, chrom, strand, tss_list) -> None:
+    def __init__(self, name, id, chrom, strand, tss_list, tes_list=None) -> None:
         """Initialize the Gene class.
 
         Parameters
@@ -82,7 +82,11 @@ class Gene:
         strand
             The strand of the gene.
         tss_list
-            The TSS list of the gene.
+            The TSS list of the gene (DataFrame with Start and End columns).
+        tes_list
+            Optional TES list of the gene (DataFrame with Start and End columns).
+            If not provided, will be constructed from tss_list on first access.
+            For backward compatibility, defaults to None.
         """
         self.name = name
         self.id = id
@@ -90,6 +94,7 @@ class Gene:
         self.strand = strand
 
         self.tss_list = tss_list
+        self._tes_list = tes_list  # Can be provided or constructed on first access
 
     def __repr__(self) -> str:
         return "Gene(name={}, id={}, chrom={}, strand={}, tss_list={})".format(
@@ -115,15 +120,115 @@ class Gene:
         ]
 
     @property
+    def tss_coordinate(self) -> int:
+        """Get the primary Transcription Start Site (TSS) coordinate for the gene.
+
+        Returns the primary TSS coordinate, symmetric to tes property.
+        For '+' strand genes, returns the minimum Start coordinate.
+        For '-' strand genes, returns the maximum Start coordinate.
+
+        Returns
+        -------
+        int
+            The TSS coordinate.
+        """
+        if self.strand == "+":
+            return self.tss_list.Start.min()  # Min Start coordinate for '+' strand
+        elif self.strand == "-":
+            return self.tss_list.Start.max()  # Max Start coordinate for '-' strand
+        else:
+            return self.tss_list.Start.min()  # Fallback
+
+    @property
+    def tes_list(self) -> pd.DataFrame:
+        """Get the TES list for the gene, constructed from tss_list if not provided.
+
+        For '+' strand genes, TES coordinates are extracted from End column.
+        For '-' strand genes, TES coordinates are extracted from Start column.
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing TES coordinates, similar structure to tss_list.
+
+        Raises
+        ------
+        ValueError
+            If tss_list doesn't have End column and tes_list was not provided.
+        """
+        if self._tes_list is not None:
+            return self._tes_list
+
+        # Construct from tss_list if it has End column
+        if 'End' not in self.tss_list.columns:
+            raise ValueError(
+                f"Cannot construct tes_list for gene {self.name}: "
+                f"tss_list doesn't have End column. Provide tes_list parameter "
+                f"when creating Gene object, or ensure tss_list includes End column."
+            )
+
+        if self.strand == "+":
+            # For '+' strand, TES is at End coordinates
+            tes_coords = self.tss_list.End.values
+        elif self.strand == "-":
+            # For '-' strand, TES is at Start coordinates (5' end)
+            tes_coords = self.tss_list.Start.values
+        else:
+            # Unstranded - use End as fallback
+            tes_coords = self.tss_list.End.values
+
+        # Construct tes_list DataFrame similar to tss_list structure
+        self._tes_list = pd.DataFrame({
+            'Chromosome': self.tss_list.Chromosome.values,
+            'Start': tes_coords,
+            'End': tes_coords,  # TES is a single coordinate
+            'Strand': self.tss_list.Strand.values,
+            'gene_name': self.tss_list.gene_name.values,
+            'gene_id': self.tss_list.gene_id.values,
+            'gene_type': self.tss_list.gene_type.values if 'gene_type' in self.tss_list.columns else [None] * len(tes_coords),
+        })
+
+        return self._tes_list
+
+    @property
+    def tes(self) -> int:
+        """Get the Transcription End Site (TES) coordinate for the gene.
+
+        Returns the primary TES coordinate, similar to how TSS works.
+        For '+' strand genes, returns the maximum End coordinate.
+        For '-' strand genes, returns the minimum Start coordinate.
+
+        Returns
+        -------
+        int
+            The TES coordinate.
+        """
+        tes_list = self.tes_list
+        if self.strand == "+":
+            return tes_list.Start.max()  # Max End coordinate for '+' strand
+        elif self.strand == "-":
+            return tes_list.Start.min()  # Min Start coordinate for '-' strand
+        else:
+            return tes_list.Start.max()  # Fallback
+
+    @property
     def genomic_range(
         self,
     ) -> tuple[str, int, int, str]:
+        """Get the genomic range of the gene (start, end coordinates).
+
+        Returns
+        -------
+        tuple[str, int, int, str]
+            (chromosome, start, end, strand)
+        """
         return (
             self.chrom,
             self.tss_list.Start.min(),
-            self.tss_list.Start.min(),
+            self.tss_list.End.max(),
             self.strand,
         )
+
 
     def get_track(self, track, upstream=1000, downstream=1000, **kwargs):
         return track.get_track(
@@ -175,11 +280,96 @@ class Gene:
                 **kwargs,
             )
 
+    def get_tes_track(self, track, upstream=1000, downstream=1000, **kwargs):
+        """Get track data centered around the gene's Transcription End Site (TES).
+
+        Parameters
+        ----------
+        track
+            The track object to retrieve data from.
+        upstream : int, optional
+            Number of base pairs upstream of the TES to include.
+            For '+' strand genes, this extends before the TES (toward the gene body).
+            For '-' strand genes, this extends after the TES (away from the gene body).
+            Defaults to 1000.
+        downstream : int, optional
+            Number of base pairs downstream of the TES to include.
+            For '+' strand genes, this extends after the TES (away from the gene body).
+            For '-' strand genes, this extends before the TES (toward the gene body).
+            Defaults to 1000.
+        **kwargs
+            Additional arguments passed to track.get_track.
+
+        Returns
+        -------
+        Track or other return type from track.get_track
+        """
+        tes_list = self.tes_list
+        if self.strand == "+":
+            return track.get_track(
+                chr_name=self.chrom,
+                start=tes_list.Start.max() - upstream,
+                end=tes_list.Start.max() + downstream,
+                **kwargs,
+            )
+        else:
+            # For '-' strand, upstream/downstream are reversed relative to transcription direction
+            return track.get_track(
+                chr_name=self.chrom,
+                start=tes_list.Start.min() - downstream,
+                end=tes_list.Start.min() + upstream,
+                **kwargs,
+            )
+
+    def get_tes_track_obj(
+        self, track, upstream=1000, downstream=1000, **kwargs
+    ) -> Track:
+        """Get Track object centered around the gene's Transcription End Site (TES).
+
+        Parameters
+        ----------
+        track
+            The track object to retrieve data from.
+        upstream : int, optional
+            Number of base pairs upstream of the TES to include.
+            For '+' strand genes, this extends before the TES (toward the gene body).
+            For '-' strand genes, this extends after the TES (away from the gene body).
+            Defaults to 1000.
+        downstream : int, optional
+            Number of base pairs downstream of the TES to include.
+            For '+' strand genes, this extends after the TES (away from the gene body).
+            For '-' strand genes, this extends before the TES (toward the gene body).
+            Defaults to 1000.
+        **kwargs
+            Additional arguments passed to track.get_track_obj.
+
+        Returns
+        -------
+        Track
+            Track object for the TES region.
+        """
+        tes_list = self.tes_list
+        if self.strand == "+":
+            return track.get_track_obj(
+                chr_name=self.chrom,
+                start=tes_list.Start.max() - upstream,
+                end=tes_list.Start.max() + downstream,
+                **kwargs,
+            )
+        else:
+            # For '-' strand, upstream/downstream are reversed relative to transcription direction
+            return track.get_track_obj(
+                chr_name=self.chrom,
+                start=tes_list.Start.min() - downstream,
+                end=tes_list.Start.min() + upstream,
+                **kwargs,
+            )
+
 
 class GeneExp(Gene):
     """A class to represent a gene with expression data. Not very useful."""
 
-    def __init__(self, name, id, chrom, strand, tss_list, exp_list) -> None:
+    def __init__(self, name, id, chrom, strand, tss_list, exp_list, tes_list=None) -> None:
         """Initialize the GeneExp class.
 
         Parameters
@@ -196,8 +386,11 @@ class GeneExp(Gene):
             The TSS list of the gene.
         exp_list : pd.DataFrame
             The expression list of the gene.
+        tes_list : pd.DataFrame, optional
+            Optional TES list of the gene. If not provided, will be constructed
+            from tss_list on first access. Defaults to None.
         """
-        super().__init__(name, id, chrom, strand, tss_list)
+        super().__init__(name, id, chrom, strand, tss_list, tes_list=tes_list)
         self.exp_list = exp_list
 
     def __repr__(self) -> str:

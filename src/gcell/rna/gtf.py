@@ -118,22 +118,49 @@ class GTF:
             The Gene object.
         """
         df = self.gtf[self.gtf.gene_name == gene_name]
+        
+        # Construct tss_list (using Start column)
+        tss_list = df[
+            [
+                "Chromosome",
+                "Start",
+                "End",
+                "Strand",
+                "gene_name",
+                "gene_id",
+                "gene_type",
+            ]
+        ]
+        
+        # Construct tes_list (using End for '+' strand, Start for '-' strand)
+        strand = df.Strand.iloc[0]
+        if strand == "+":
+            # For '+' strand, TES is at End coordinates
+            tes_coords = df.End.values
+        elif strand == "-":
+            # For '-' strand, TES is at Start coordinates
+            tes_coords = df.Start.values
+        else:
+            # Unstranded - use End as fallback
+            tes_coords = df.End.values
+        
+        tes_list = pd.DataFrame({
+            'Chromosome': df.Chromosome.values,
+            'Start': tes_coords,
+            'End': tes_coords,
+            'Strand': df.Strand.values,
+            'gene_name': df.gene_name.values,
+            'gene_id': df.gene_id.values,
+            'gene_type': df.gene_type.values if 'gene_type' in df.columns else [None] * len(tes_coords),
+        })
+        
         return Gene(
             name=df.gene_name.iloc[0],
             id=df.gene_id.iloc[0],
             chrom=df.Chromosome.iloc[0],
-            strand=df.Strand.iloc[0],
-            tss_list=df[
-                [
-                    "Chromosome",
-                    "Start",
-                    "End",
-                    "Strand",
-                    "gene_name",
-                    "gene_id",
-                    "gene_type",
-                ]
-            ],
+            strand=strand,
+            tss_list=tss_list,
+            tes_list=tes_list,
         )
 
     def get_genes(self, gene_names) -> GeneSets:
@@ -165,22 +192,49 @@ class GTF:
             The Gene object.
         """
         df = self.gtf[self.gtf.gene_id.str.startswith(gene_id)]
+        
+        # Construct tss_list (using Start column)
+        tss_list = df[
+            [
+                "Chromosome",
+                "Start",
+                "End",
+                "Strand",
+                "gene_name",
+                "gene_id",
+                "gene_type",
+            ]
+        ]
+        
+        # Construct tes_list (using End for '+' strand, Start for '-' strand)
+        strand = df.Strand.iloc[0]
+        if strand == "+":
+            # For '+' strand, TES is at End coordinates
+            tes_coords = df.End.values
+        elif strand == "-":
+            # For '-' strand, TES is at Start coordinates
+            tes_coords = df.Start.values
+        else:
+            # Unstranded - use End as fallback
+            tes_coords = df.End.values
+        
+        tes_list = pd.DataFrame({
+            'Chromosome': df.Chromosome.values,
+            'Start': tes_coords,
+            'End': tes_coords,
+            'Strand': df.Strand.values,
+            'gene_name': df.gene_name.values,
+            'gene_id': df.gene_id.values,
+            'gene_type': df.gene_type.values if 'gene_type' in df.columns else [None] * len(tes_coords),
+        })
+        
         return Gene(
             name=df.gene_name.iloc[0],
             id=df.gene_id.iloc[0],
             chrom=df.Chromosome.iloc[0],
-            strand=df.Strand.iloc[0],
-            tss_list=df[
-                [
-                    "Chromosome",
-                    "Start",
-                    "End",
-                    "Strand",
-                    "gene_name",
-                    "gene_id",
-                    "gene_type",
-                ]
-            ],
+            strand=strand,
+            tss_list=tss_list,
+            tes_list=tes_list,
         )
 
     def get_genebodies(self, gene_names=None) -> pd.DataFrame:

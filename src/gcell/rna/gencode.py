@@ -175,6 +175,34 @@ class Gencode(GTF):
         return self.gtf.set_index("gene_name")["Start"].to_dict()
 
     @property
+    def gene_to_tes(self):
+        """Dict mapping gene names to their transcription end sites (TES).
+
+        For '+' strand genes, TES is the maximum End coordinate of the gene body.
+        For '-' strand genes, TES is the minimum Start coordinate of the gene body.
+
+        Returns:
+            dict: Dictionary with gene names as keys and TES positions as values
+        """
+        # Group by gene_name and calculate TES based on strand
+        gene_groups = self.gtf.groupby("gene_name")
+        tes_dict = {}
+
+        for gene_name, group in gene_groups:
+            strand = group["Strand"].iloc[0]
+            if strand == "+":
+                # For '+' strand, TES is at the maximum End coordinate
+                tes_dict[gene_name] = group["End"].max()
+            elif strand == "-":
+                # For '-' strand, TES is at the minimum Start coordinate
+                tes_dict[gene_name] = group["Start"].min()
+            else:
+                # Unstranded case - use End.max() as fallback
+                tes_dict[gene_name] = group["End"].max()
+
+        return tes_dict
+
+    @property
     def gene_to_type(self):
         """Dict mapping gene names to their gene types (e.g., protein_coding, lincRNA).
 
