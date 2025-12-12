@@ -140,7 +140,19 @@ class GTF:
         # Construct tes_list using original GTF data (not processed gtf)
         # The processed gtf has End=Start for '+' strand and Start=End for '-' strand
         # which is correct for TSS but wrong for TES
-        original_df = self._original_gtf[self._original_gtf.gene_name == gene_name]
+        # Use original_gtf property (works for Gencode) or _original_gtf attribute (works for GTF)
+        try:
+            # Try property first (works for Gencode class)
+            original_gtf_df = self.original_gtf
+        except AttributeError:
+            # Fall back to attribute (works for GTF class)
+            if hasattr(self, '_original_gtf'):
+                original_gtf_df = self._original_gtf
+            else:
+                raise AttributeError(
+                    "Cannot access original GTF data. Need either 'original_gtf' property (Gencode) or '_original_gtf' attribute (GTF)."
+                )
+        original_df = original_gtf_df[original_gtf_df.gene_name == gene_name]
         original_df = original_df[original_df.Feature == "transcript"]  # Use transcript features
 
         # Match transcripts by transcript_id to ensure correct order
@@ -233,7 +245,19 @@ class GTF:
         # Construct tes_list using original GTF data (not processed gtf)
         # The processed gtf has End=Start for '+' strand and Start=End for '-' strand
         # which is correct for TSS but wrong for TES
-        original_df = self._original_gtf[self._original_gtf.gene_id.str.startswith(gene_id)]
+        # Use original_gtf property (works for Gencode) or _original_gtf attribute (works for GTF)
+        try:
+            # Try property first (works for Gencode class)
+            original_gtf_df = self.original_gtf
+        except AttributeError:
+            # Fall back to attribute (works for GTF class)
+            if hasattr(self, '_original_gtf'):
+                original_gtf_df = self._original_gtf
+            else:
+                raise AttributeError(
+                    "Cannot access original GTF data. Need either 'original_gtf' property (Gencode) or '_original_gtf' attribute (GTF)."
+                )
+        original_df = original_gtf_df[original_gtf_df.gene_id.str.startswith(gene_id)]
         original_df = original_df[original_df.Feature == "transcript"]  # Use transcript features
 
         # Match transcripts by transcript_id to ensure correct order
