@@ -107,12 +107,18 @@ class Gene:
         self._gene_end = gene_end
 
     def __repr__(self) -> str:
-        return "Gene(name={}, id={}, chrom={}, strand={}, tss_list={})".format(
+        tss_coords = ",".join(self.tss_list.Start.values.astype(str))
+        try:
+            tes_coords = ",".join(self.tes_list.Start.values.astype(str))
+        except (ValueError, AttributeError):
+            tes_coords = "N/A"
+        return "Gene(name={}, id={}, chrom={}, strand={}, tss={}, tes={})".format(
             self.name,
             self.id,
             self.chrom,
             self.strand,
-            ",".join(self.tss_list.Start.values.astype(str)),
+            tss_coords,
+            tes_coords,
         )
 
     @property
@@ -196,7 +202,7 @@ class Gene:
             'gene_name': self.tss_list.gene_name.values,
             'gene_id': self.tss_list.gene_id.values,
             'gene_type': self.tss_list.gene_type.values if 'gene_type' in self.tss_list.columns else [None] * len(tes_coords),
-        })
+        }).reset_index(drop=True)
 
         return self._tes_list
 
@@ -227,15 +233,19 @@ class Gene:
     ) -> tuple[str, int, int, str]:
         """Get the genomic range of the gene (start, end coordinates).
 
-        Uses the full gene body coordinates from the original GTF if available,
-        otherwise falls back to calculating from tss_list.
+        Uses the full gene body coordinates from the original GTF.
+        Requires gene_start and gene_end to be provided during Gene initialization.
 
         Returns
         -------
         tuple[str, int, int, str]
             (chromosome, start, end, strand)
+
+        Raises
+        ------
+        ValueError
+            If gene_start or gene_end are not available.
         """
-        # Use stored gene_start/gene_end from original GTF if available
         if self._gene_start is not None and self._gene_end is not None:
             return (
                 self.chrom,
@@ -243,12 +253,10 @@ class Gene:
                 self._gene_end,
                 self.strand,
             )
-        # Fallback to tss_list (for backward compatibility)
-        return (
-            self.chrom,
-            self.tss_list.Start.min(),
-            self.tss_list.End.max(),
-            self.strand,
+        raise ValueError(
+            f"genomic_range not available for gene {self.name}: "
+            f"gene_start and gene_end must be provided during Gene initialization. "
+            f"Use gtf.get_gene() or gencode.get_gene() to create Gene objects with full genomic range."
         )
 
 

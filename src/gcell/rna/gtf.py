@@ -135,19 +135,31 @@ class GTF:
                 "gene_id",
                 "gene_type",
             ]
-        ]
+        ].reset_index(drop=True)
 
-        # Construct tes_list (using End for '+' strand, Start for '-' strand)
+        # Construct tes_list using original GTF data (not processed gtf)
+        # The processed gtf has End=Start for '+' strand and Start=End for '-' strand
+        # which is correct for TSS but wrong for TES
+        original_df = self._original_gtf[self._original_gtf.gene_name == gene_name]
+        original_df = original_df[original_df.Feature == "transcript"]  # Use transcript features
+
+        # Match transcripts by transcript_id to ensure correct order
+        # Create a mapping from transcript_id to TES coordinate
+        original_df_indexed = original_df.set_index('transcript_id')
         strand = df.Strand.iloc[0]
+
         if strand == "+":
-            # For '+' strand, TES is at End coordinates
-            tes_coords = df.End.values
+            # For '+' strand, TES is at End coordinates from original GTF
+            tes_dict = original_df_indexed.End.to_dict()
         elif strand == "-":
-            # For '-' strand, TES is at Start coordinates
-            tes_coords = df.Start.values
+            # For '-' strand, TES is at Start coordinates from original GTF
+            tes_dict = original_df_indexed.Start.to_dict()
         else:
             # Unstranded - use End as fallback
-            tes_coords = df.End.values
+            tes_dict = original_df_indexed.End.to_dict()
+
+        # Get TES coordinates in the same order as df (which has transcript_id)
+        tes_coords = df.transcript_id.map(tes_dict).values
 
         tes_list = pd.DataFrame({
             'Chromosome': df.Chromosome.values,
@@ -157,7 +169,7 @@ class GTF:
             'gene_name': df.gene_name.values,
             'gene_id': df.gene_id.values,
             'gene_type': df.gene_type.values if 'gene_type' in df.columns else [None] * len(tes_coords),
-        })
+        }).reset_index(drop=True)
 
         return Gene(
             name=df.gene_name.iloc[0],
@@ -216,19 +228,31 @@ class GTF:
                 "gene_id",
                 "gene_type",
             ]
-        ]
+        ].reset_index(drop=True)
 
-        # Construct tes_list (using End for '+' strand, Start for '-' strand)
+        # Construct tes_list using original GTF data (not processed gtf)
+        # The processed gtf has End=Start for '+' strand and Start=End for '-' strand
+        # which is correct for TSS but wrong for TES
+        original_df = self._original_gtf[self._original_gtf.gene_id.str.startswith(gene_id)]
+        original_df = original_df[original_df.Feature == "transcript"]  # Use transcript features
+
+        # Match transcripts by transcript_id to ensure correct order
+        # Create a mapping from transcript_id to TES coordinate
+        original_df_indexed = original_df.set_index('transcript_id')
         strand = df.Strand.iloc[0]
+
         if strand == "+":
-            # For '+' strand, TES is at End coordinates
-            tes_coords = df.End.values
+            # For '+' strand, TES is at End coordinates from original GTF
+            tes_dict = original_df_indexed.End.to_dict()
         elif strand == "-":
-            # For '-' strand, TES is at Start coordinates
-            tes_coords = df.Start.values
+            # For '-' strand, TES is at Start coordinates from original GTF
+            tes_dict = original_df_indexed.Start.to_dict()
         else:
             # Unstranded - use End as fallback
-            tes_coords = df.End.values
+            tes_dict = original_df_indexed.End.to_dict()
+
+        # Get TES coordinates in the same order as df (which has transcript_id)
+        tes_coords = df.transcript_id.map(tes_dict).values
 
         tes_list = pd.DataFrame({
             'Chromosome': df.Chromosome.values,
@@ -238,7 +262,7 @@ class GTF:
             'gene_name': df.gene_name.values,
             'gene_id': df.gene_id.values,
             'gene_type': df.gene_type.values if 'gene_type' in df.columns else [None] * len(tes_coords),
-        })
+        }).reset_index(drop=True)
 
         return Gene(
             name=df.gene_name.iloc[0],
