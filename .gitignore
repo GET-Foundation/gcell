@@ -28,9 +28,13 @@ __pycache__/
 /src/getcell/_version.py
 /ci/getcell-min-deps.txt
 /dist/
+/build/
+/*.egg-info/
 /*-env/
 /env-*/
 /environment.yml
+# Temporary setuptools build artifacts
+/=*
 
 # OS stuff
 .DS_Store
