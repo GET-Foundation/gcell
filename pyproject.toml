@@ -93,6 +93,7 @@ doc = [
     "myst-nb>=1.1.2",
     "sphinx-design",
     "sphinx-tabs",
+    "jupyter-packaging",
     "readthedocs-sphinx-search",
     "sphinxext-opengraph", # for nice cards when sharing on social
     "sphinx-copybutton",
