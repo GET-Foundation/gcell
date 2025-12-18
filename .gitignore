@@ -29,7 +29,8 @@ __pycache__/
 /ci/getcell-min-deps.txt
 /dist/
 /build/
-/*.egg-info/
+src/*.egg-info/
+*.egg-info/
 /*-env/
 /env-*/
 /environment.yml
