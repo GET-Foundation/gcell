@@ -118,6 +118,7 @@ version_file = "src/gcell/_version.py"
 
 [tool.uv.extra-build-dependencies]
 sorted-nearest = ["Cython"]
+nglview = ["jupyter-packaging"]
 
 [tool.setuptools.package-data]
 "gcell" = ["config/**/*.yaml", "**/*.yaml", "**/*.json", "config/*.yaml"]
