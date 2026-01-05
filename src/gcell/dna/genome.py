@@ -77,7 +77,7 @@ class ChromSize:
         self.chrom_sizes = self.parse_or_download_chrom_sizes()
 
     def _download_chrom_sizes(self):
-        url = f"http://hgdownload.soe.ucsc.edu/goldenPath/{self.assembly}/bigZips/{self.assembly}.chrom.sizes"
+        url = f"http://hgdownload.cse.ucsc.edu/goldenPath/{self.assembly}/bigZips/{self.assembly}.chrom.sizes"
         response = requests.get(url)
         if response.status_code != 200:
             raise ConnectionError("Failed to download chromosome data")
@@ -133,12 +133,32 @@ class ChromSize:
     def parse_or_download_chrom_sizes(self):
         """
         Parse or download chromosome sizes
+
+        Checks for files in the following order:
+        1. {assembly}_chrom_sizes.txt (processed format)
+        2. {assembly}.chrom.sizes (raw UCSC format, downloaded by Genome._download_files_if_not_exist)
+        3. Downloads if neither exists, then saves as .txt for future use
         """
-        filepath = self.annotation_dir / f"{self.assembly}_chrom_sizes.txt"
-        if filepath.exists():
-            return self._parse_chrom_data(filepath.read_text())
-        else:
-            return self._download_chrom_sizes()
+        # Check for processed format first
+        processed_filepath = self.annotation_dir / f"{self.assembly}_chrom_sizes.txt"
+        if processed_filepath.exists():
+            return self._parse_chrom_data(processed_filepath.read_text())
+
+        # Check for raw UCSC format (downloaded by Genome._download_files_if_not_exist)
+        raw_filepath = self.annotation_dir / f"{self.assembly}.chrom.sizes"
+        if raw_filepath.exists():
+            chrom_sizes = self._parse_chrom_data(raw_filepath.read_text())
+            # Save as .txt for future use (faster lookup)
+            self.chrom_sizes = chrom_sizes
+            self.save_chrom_sizes()
+            return chrom_sizes
+
+        # Download if neither exists
+        chrom_sizes = self._download_chrom_sizes()
+        # Save as .txt for future use
+        self.chrom_sizes = chrom_sizes
+        self.save_chrom_sizes()
+        return chrom_sizes
 
     def as_pyranges(self):
         """
@@ -222,7 +242,7 @@ class ChromGap:
         self.agp_data = self.parse_or_download_agp()
 
     def _download_agp(self):
-        url = f"https://hgdownload.soe.ucsc.edu/goldenPath/{self.assembly}/bigZips/{self.assembly}.agp.gz"
+        url = f"http://hgdownload.cse.ucsc.edu/goldenPath/{self.assembly}/bigZips/{self.assembly}.agp.gz"
         response = requests.get(url)
         if response.status_code != 200:
             raise ConnectionError("Failed to download AGP data")
@@ -289,16 +309,32 @@ class ChromGap:
     def parse_or_download_agp(self):
         """
         Parse or download AGP data
+
+        Checks for files in the following order:
+        1. {assembly}_agp.txt (processed format)
+        2. {assembly}.agp.gz (raw UCSC format, downloaded by Genome._download_files_if_not_exist)
+        3. Downloads if neither exists
         """
-        filepath = self.annotation_dir / f"{self.assembly}_agp.txt"
-        if filepath.exists():
-            return pd.read_csv(filepath, sep="\t")
-        else:
-            data = self._download_agp()
+        # Check for processed format first
+        processed_filepath = self.annotation_dir / f"{self.assembly}_agp.txt"
+        if processed_filepath.exists():
+            return pd.read_csv(processed_filepath, sep="\t")
+
+        # Check for raw UCSC format (downloaded by Genome._download_files_if_not_exist)
+        raw_filepath = self.annotation_dir / f"{self.assembly}.agp.gz"
+        if raw_filepath.exists():
+            data = gzip.decompress(raw_filepath.read_bytes()).decode("utf-8")
             agp_data = self._parse_agp_data(data)
             self.agp_data = agp_data
             self.save_agp_data()
             return agp_data
+
+        # Download if neither exists
+        data = self._download_agp()
+        agp_data = self._parse_agp_data(data)
+        self.agp_data = agp_data
+        self.save_agp_data()
+        return agp_data
 
     def __repr__(self) -> str:
         return (
