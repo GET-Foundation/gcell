@@ -78,10 +78,20 @@ class ChromSize:
 
     def _download_chrom_sizes(self):
         url = f"http://hgdownload.cse.ucsc.edu/goldenPath/{self.assembly}/bigZips/{self.assembly}.chrom.sizes"
-        response = requests.get(url)
-        if response.status_code != 200:
-            raise ConnectionError("Failed to download chromosome data")
-        return self._parse_chrom_data(response.text)
+        try:
+            response = requests.get(url, timeout=30)
+            if response.status_code != 200:
+                raise ConnectionError(
+                    f"Failed to download chromosome data for assembly '{self.assembly}'. "
+                    f"HTTP status: {response.status_code}, URL: {url}. "
+                    f"Response: {response.text[:200]}"
+                )
+            return self._parse_chrom_data(response.text)
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(
+                f"Failed to download chromosome data for assembly '{self.assembly}'. "
+                f"URL: {url}. Error: {e}"
+            ) from e
 
     def _parse_chrom_data(self, data):
         chrom_sizes = {}
