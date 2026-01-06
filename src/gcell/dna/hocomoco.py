@@ -4,17 +4,38 @@ HOCOMOCO motif database interface for Caesar.
 This module provides a unified interface for loading and working with HOCOMOCO
 transcription factor motif databases, supporting both original PWM format and
 pre-aligned tensor format.
+
+PyTorch is an optional dependency. Core functionality works with numpy only.
+For GPU operations and torch.Tensor methods, install with: pip install gcell[torch]
 """
 
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Any, Union
 
 import numpy as np
-import torch
+
+# Optional torch import
+try:
+    import torch
+
+    TORCH_AVAILABLE = True
+except ImportError:
+    torch = None  # type: ignore[assignment]
+    TORCH_AVAILABLE = False
 
 from gcell._settings import get_setting
+
+
+def is_torch_available() -> bool:
+    """Check if PyTorch is available for use with HocomocoIO.
+
+    Returns:
+        True if torch is installed, False otherwise.
+    """
+    return TORCH_AVAILABLE
+
 
 from .motif_utils import (
     compute_pvalue_mapping,
@@ -78,7 +99,7 @@ class HocomocoIO:
 
         # Cached data
         self._motif_names: list[str] | None = None
-        self._motif_kernels: torch.Tensor | None = None
+        self._motif_kernels: np.ndarray | None = None  # numpy array; convert to torch when needed
         self._annotations: dict | None = None
         self._similarity_matrix: np.ndarray | None = None
         self._significance_thresholds: dict | None = None
@@ -94,11 +115,32 @@ class HocomocoIO:
         return self._motif_names
 
     @property
-    def motif_kernels(self) -> torch.Tensor:
-        """Get motif kernels tensor (N, L, 4)."""
+    def motif_kernels(self) -> np.ndarray:
+        """Get motif kernels array (N, L, 4)."""
         if self._motif_kernels is None:
             self._load_motifs()
         return self._motif_kernels
+
+    def motif_kernels_tensor(self) -> Any:
+        """
+        Get motif kernels as a torch.Tensor (N, L, 4).
+
+        Requires torch to be installed. Install with: pip install gcell[torch]
+
+        Returns:
+            torch.Tensor of motif kernels
+        """
+        self._require_torch("motif_kernels_tensor")
+        return torch.from_numpy(self.motif_kernels).float()
+
+    @staticmethod
+    def _require_torch(method_name: str) -> None:
+        """Raise ImportError if torch is not available."""
+        if not TORCH_AVAILABLE:
+            raise ImportError(
+                f"The method '{method_name}' requires PyTorch. "
+                "Install it with: pip install gcell[torch]"
+            )
 
     @property
     def similarity_matrix(self) -> np.ndarray | None:
@@ -173,12 +215,26 @@ class HocomocoIO:
             if not Path(self.aligned_motif_path).exists():
                 return False
 
+            # Loading .pt files requires torch
+            if not TORCH_AVAILABLE:
+                logger.info(
+                    "Skipping aligned motifs (torch not installed). "
+                    "Install with: pip install gcell[torch]"
+                )
+                return False
+
             logger.info(f"Loading pre-aligned motifs from: {self.aligned_motif_path}")
             motif_data = torch.load(
                 self.aligned_motif_path, map_location="cpu", weights_only=False
             )
 
-            self._motif_kernels = motif_data["motif_kernels"]
+            # Convert torch tensors to numpy arrays for storage
+            kernels = motif_data["motif_kernels"]
+            if hasattr(kernels, "numpy"):
+                self._motif_kernels = kernels.numpy()
+            else:
+                self._motif_kernels = np.asarray(kernels)
+
             self._motif_names = motif_data["motif_names"]
             self._similarity_matrix = motif_data.get("similarity_matrix", None)
 
@@ -288,8 +344,8 @@ class HocomocoIO:
                 _,
             ) = processed_data
 
-            # Convert to tensor
-            self._motif_kernels = torch.from_numpy(padded_kernels).float()
+            # Store as numpy array (float32 for consistency)
+            self._motif_kernels = padded_kernels.astype(np.float32)
 
             logger.info(
                 f"Loaded {len(self._motif_names)} motifs from PWM source with shape {self._motif_kernels.shape}"
@@ -335,7 +391,7 @@ class HocomocoIO:
         # Create new instance
         filtered_io = HocomocoIO(use_aligned=False)
         filtered_io._motif_names = motif_names
-        filtered_io._motif_kernels = torch.from_numpy(padded_kernels).float()
+        filtered_io._motif_kernels = padded_kernels.astype(np.float32)
         filtered_io._annotations = filtered_annotations
         filtered_io._significance_thresholds = significance_thresholds
         filtered_io._loaded_with_aligned = False
@@ -372,7 +428,7 @@ class HocomocoIO:
         # Create new instance
         rc_io = HocomocoIO(use_aligned=False)
         rc_io._motif_names = motif_names
-        rc_io._motif_kernels = torch.from_numpy(padded_kernels).float()
+        rc_io._motif_kernels = padded_kernels.astype(np.float32)
         rc_io._annotations = rc_annotations
         rc_io._significance_thresholds = significance_thresholds
         rc_io._loaded_with_aligned = False
@@ -380,7 +436,7 @@ class HocomocoIO:
         logger.info(f"Created {len(motif_names)} motifs with reverse complements")
         return rc_io
 
-    def get_threshold(self, p_value: str = "p0.0001") -> torch.Tensor | None:
+    def get_threshold(self, p_value: str = "p0.0001") -> np.ndarray | None:
         """
         Get significance thresholds for a given p-value.
 
@@ -388,35 +444,60 @@ class HocomocoIO:
             p_value: P-value threshold string (e.g., "p0.0001")
 
         Returns:
-            Tensor of thresholds or None if not available
+            Array of thresholds or None if not available
         """
         if self.significance_thresholds and p_value in self.significance_thresholds:
-            return torch.from_numpy(self.significance_thresholds[p_value]).float()
+            return self.significance_thresholds[p_value].astype(np.float32)
+        return None
+
+    def get_threshold_tensor(self, p_value: str = "p0.0001") -> Any:
+        """
+        Get significance thresholds as torch.Tensor for a given p-value.
+
+        Requires torch to be installed. Install with: pip install gcell[torch]
+
+        Args:
+            p_value: P-value threshold string (e.g., "p0.0001")
+
+        Returns:
+            torch.Tensor of thresholds or None if not available
+        """
+        self._require_torch("get_threshold_tensor")
+        threshold = self.get_threshold(p_value)
+        if threshold is not None:
+            return torch.from_numpy(threshold).float()
         return None
 
     def prepare_for_gpu(
         self,
         device: str = "cuda",
-        dtype: torch.dtype = torch.float32,
+        dtype: Any = None,
         p_value: str = "p0.0001",
-    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+    ) -> tuple[Any, Any]:
         """
         Prepare motif data for GPU computation.
 
+        Requires torch to be installed. Install with: pip install gcell[torch]
+
         Args:
             device: Target device (cuda/cpu)
-            dtype: Numerical precision
+            dtype: Numerical precision (torch.dtype, defaults to torch.float32)
             p_value: P-value threshold to prepare
 
         Returns:
-            Tuple of (motif_kernels_gpu, thresholds_gpu)
+            Tuple of (motif_kernels_gpu, thresholds_gpu) as torch.Tensors
         """
-        kernels_gpu = self.motif_kernels.to(device=device, dtype=dtype)
+        self._require_torch("prepare_for_gpu")
+
+        if dtype is None:
+            dtype = torch.float32
+
+        kernels_gpu = torch.from_numpy(self.motif_kernels).to(device=device, dtype=dtype)
 
         thresholds_gpu = None
-        threshold_tensor = self.get_threshold(p_value)
-        if threshold_tensor is not None:
-            thresholds_gpu = threshold_tensor.to(device=device, dtype=dtype)
+        threshold = self.get_threshold(p_value)
+        if threshold is not None:
+            thresholds_gpu = torch.from_numpy(threshold).to(device=device, dtype=dtype)
 
         return kernels_gpu, thresholds_gpu
 
@@ -435,7 +516,7 @@ class HocomocoIO:
         except ValueError:
             return None
 
-    def get_motif_by_index(self, index: int) -> tuple[str, torch.Tensor]:
+    def get_motif_by_index(self, index: int) -> tuple[str, np.ndarray]:
         """
         Get motif name and kernel by index.
 
@@ -443,7 +524,7 @@ class HocomocoIO:
             index: Index of the motif
 
         Returns:
-            Tuple of (motif_name, motif_kernel)
+            Tuple of (motif_name, motif_kernel as numpy array)
         """
         return self.motif_names[index], self.motif_kernels[index]
 
@@ -884,7 +965,7 @@ class HocomocoIO:
 
     def get_score_threshold_for_pvalue(
         self, p_value: float, motif_indices: list[int] | None = None
-    ) -> torch.Tensor:
+    ) -> np.ndarray:
         """
         Get score thresholds for a given p-value.
 
@@ -894,7 +975,7 @@ class HocomocoIO:
                           If None, returns thresholds for all motifs.
 
         Returns:
-            Tensor of score thresholds with shape (n_motifs,)
+            Array of score thresholds with shape (n_motifs,)
         """
         mappings = self.pvalue_mappings
         motif_names = self.motif_names
@@ -935,29 +1016,51 @@ class HocomocoIO:
             score_threshold = (threshold_idx + smallest) * bin_size
             thresholds.append(score_threshold)
 
-        return torch.tensor(thresholds, dtype=torch.float32)
+        return np.array(thresholds, dtype=np.float32)
+
+    def get_score_threshold_for_pvalue_tensor(
+        self, p_value: float, motif_indices: list[int] | None = None
+    ) -> Any:
+        """
+        Get score thresholds as torch.Tensor for a given p-value.
+
+        Requires torch to be installed. Install with: pip install gcell[torch]
+
+        Args:
+            p_value: Desired p-value threshold (e.g., 0.0001)
+            motif_indices: Optional list of motif indices to get thresholds for.
+
+        Returns:
+            torch.Tensor of score thresholds with shape (n_motifs,)
+        """
+        self._require_torch("get_score_threshold_for_pvalue_tensor")
+        thresholds = self.get_score_threshold_for_pvalue(p_value, motif_indices)
+        return torch.from_numpy(thresholds)
 
     def scores_to_pvalues(
-        self, scores: torch.Tensor, motif_indices: torch.Tensor | None = None
-    ) -> torch.Tensor:
+        self, scores: np.ndarray, motif_indices: np.ndarray | list[int] | None = None
+    ) -> np.ndarray:
         """
         Convert motif scores to p-values.
 
         Args:
-            scores: Tensor of scores with shape (n_positions,) or (n_motifs, n_positions)
+            scores: Array of scores with shape (n_positions,) or (n_motifs, n_positions)
                    or (batch, n_motifs, n_positions)
-            motif_indices: Optional tensor of motif indices. If scores is 2D or 3D,
+            motif_indices: Optional array/list of motif indices. If scores is 2D or 3D,
                           should have shape (n_motifs,) indicating which motif each
                           dimension corresponds to.
 
         Returns:
-            Tensor of p-values with same shape as scores
+            Array of p-values with same shape as scores
         """
         mappings = self.pvalue_mappings
         motif_names = self.motif_names
 
-        scores_np = scores.cpu().numpy()
-        original_shape = scores_np.shape
+        scores_np = np.asarray(scores)
+
+        # Convert motif_indices to list if needed
+        if motif_indices is not None:
+            motif_indices = list(np.asarray(motif_indices).flatten())
 
         # Handle different input shapes
         if scores_np.ndim == 1:
@@ -965,11 +1068,7 @@ class HocomocoIO:
             if motif_indices is None:
                 motif_idx = 0
             else:
-                motif_idx = int(
-                    motif_indices.item()
-                    if motif_indices.numel() == 1
-                    else motif_indices[0]
-                )
+                motif_idx = int(motif_indices[0])
 
             motif_name = motif_names[motif_idx]
             if motif_name in mappings:
@@ -985,7 +1084,7 @@ class HocomocoIO:
 
                 for i in range(n_motifs):
                     if motif_indices is not None:
-                        motif_idx = int(motif_indices[i].item())
+                        motif_idx = int(motif_indices[i])
                     else:
                         motif_idx = i
 
@@ -1006,7 +1105,7 @@ class HocomocoIO:
                 for b in range(batch_size):
                     for i in range(n_motifs):
                         if motif_indices is not None:
-                            motif_idx = int(motif_indices[i].item())
+                            motif_idx = int(motif_indices[i])
                         else:
                             motif_idx = i
 
@@ -1023,6 +1122,33 @@ class HocomocoIO:
                         else:
                             pvalues_np[b, i] = 1.0
 
+        return pvalues_np
+
+    def scores_to_pvalues_tensor(
+        self, scores: Any, motif_indices: Any = None
+    ) -> Any:
+        """
+        Convert motif scores (torch.Tensor) to p-values.
+
+        Requires torch to be installed. Install with: pip install gcell[torch]
+
+        Args:
+            scores: torch.Tensor of scores with shape (n_positions,) or (n_motifs, n_positions)
+                   or (batch, n_motifs, n_positions)
+            motif_indices: Optional torch.Tensor of motif indices.
+
+        Returns:
+            torch.Tensor of p-values with same shape and device as input scores
+        """
+        self._require_torch("scores_to_pvalues_tensor")
+
+        scores_np = scores.cpu().numpy()
+        if motif_indices is not None:
+            motif_indices_np = motif_indices.cpu().numpy()
+        else:
+            motif_indices_np = None
+
+        pvalues_np = self.scores_to_pvalues(scores_np, motif_indices_np)
         return torch.from_numpy(pvalues_np).to(scores.device).to(scores.dtype)
 
     def __repr__(self) -> str:
