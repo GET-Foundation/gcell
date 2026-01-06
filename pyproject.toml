@@ -110,6 +110,9 @@ gpu = [
     #"esm",
     "culingam",
 ]
+torch = [
+    "torch",
+]
 [tool.setuptools.packages.find]
 where = ["src"]
 
