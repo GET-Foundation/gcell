@@ -99,7 +99,7 @@ def parallel_get_gene_by_motif(
     # Prepare the output dataset
     if "gene_by_motif" in z:
         del z["gene_by_motif"]
-    out_ds = z.create_dataset(
+    out_ds = z.create_array(
         "gene_by_motif", shape=(n_genes, n_features), dtype=np.float32, overwrite=True
     )
 
@@ -434,7 +434,7 @@ class GeneByMotif:
 
         # Compute and save average
         average_causal = self.compute_average_causal(zarr_data, n)
-        zarr_data.array("causal", average_causal, dtype="float32", overwrite=True)
+        zarr_data.create_array("causal", data=average_causal, dtype="float32", overwrite=True)
 
         # Create final graph
         causal_g = nx.from_numpy_array(average_causal, create_using=nx.DiGraph)
@@ -514,7 +514,7 @@ class GeneByMotif:
         )
 
         array_name = f"causal_{index}" if index is not None else "causal"
-        zarr_data.array(array_name, causal_g_numpy, dtype="float32", overwrite=True)
+        zarr_data.create_array(array_name, data=causal_g_numpy, dtype="float32", overwrite=True)
 
     def compute_average_causal(self, zarr_data, n):
         """Compute the average causal graph across n permutations."""
@@ -831,7 +831,7 @@ class Celltype:
                 .rename(columns={"index": "level_0"})
             )
         gene_annot = gene_annot.explode("level_0").reset_index(drop=True)
-        if isinstance(self.genelist, zarr.core.Array):
+        if isinstance(self.genelist, zarr.Array):
             self.genelist = self.genelist[:]
         gene_annot = gene_annot.iloc[self.genelist].reset_index(drop=True)
         return gene_annot
@@ -1049,8 +1049,8 @@ class Celltype:
                         jacobs.append(j.motif_summary().T)
                 jacobs_df = pd.concat(jacobs, axis=1).T
                 # save to zarr
-                self._zarr_data.array(
-                    "gene_by_motif", jacobs_df.values, dtype="float32"
+                self._zarr_data.create_array(
+                    "gene_by_motif", data=jacobs_df.values, dtype="float32"
                 )
                 self._gene_by_motif = jacobs_df
         elif path_exists_with_s3(
@@ -1088,9 +1088,9 @@ class Celltype:
 
                 else:
                     # compute corr and save to zarr also
-                    self._zarr_data.array(
+                    self._zarr_data.create_array(
                         "gene_by_motif_corr",
-                        self._gene_by_motif.get_corr().values,
+                        data=self._gene_by_motif.get_corr().values,
                         dtype="float32",
                     )
         self._gene_by_motif.data.set_index(self.gene_annot.gene_name, inplace=True)
@@ -2075,7 +2075,7 @@ class GETHydraCellType(Celltype):
 
             # save to zarr
             self._zarr_data = zarr.open(self.zarr_path, mode="a")
-            self._zarr_data.create_dataset(
+            self._zarr_data.create_array(
                 "gene_by_motif", data=gene_by_motif_df.values, overwrite=True
             )
         self._gene_by_motif = GeneByMotif(

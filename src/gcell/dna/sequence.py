@@ -14,6 +14,7 @@ DNASequenceCollection: A class for working with collections of DNA sequences
 from collections.abc import Iterator
 from pathlib import Path
 
+import numcodecs
 import numpy as np
 import pandas as pd
 import zarr
@@ -193,12 +194,12 @@ class DNASequence(Seq):
         zarr_file = zarr.open_group(zarr_file_path, "w")
         for chr in tqdm(included_chromosomes):
             data = self.get_sequence(chr, 0, self.chrom_sizes[chr]).one_hot
-            zarr_file.create_dataset(
+            zarr_file.create_array(
                 chr,
                 data=data,
                 chunks=(2000000, 4),
                 dtype="i4",
-                compressor=zarr.Blosc(cname="zstd", clevel=3, shuffle=2),
+                compressors=numcodecs.Blosc(cname="zstd", clevel=3, shuffle=2),
             )
         return
 
@@ -437,10 +438,10 @@ class DNASequenceCollection:
         zarr_group = zarr.open_group(zarr_root, mode="a")
 
         # save the one-hot encoding to the specified key in the zarr group
-        zarr_group.create_dataset(
+        zarr_group.create_array(
             key,
             data=one_hot,
             chunks=chunks,
             dtype="i1",
-            compressor=zarr.Blosc(cname="zstd", clevel=3),
+            compressors=numcodecs.Blosc(cname="zstd", clevel=3),
         )

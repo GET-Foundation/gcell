@@ -5,7 +5,7 @@ requires = ["setuptools>=64", "setuptools-scm>=8"]
 [project]
 name = "gcell"
 description = "A Python library that represents different entities in a cell"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 authors = [
     { name = "Xi Fu", email = "fuxialexander@gmail.com" },
@@ -18,9 +18,9 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Natural Language :: English",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 dependencies = [
@@ -51,7 +51,8 @@ dependencies = [
     "seqlogo",
     "tqdm",
     "xmlschema",
-    "zarr<3",
+    "zarr>=3",
+    "numcodecs",
     "nglview<4",
     "py3Dmol",
     "ruff>=0.14.13",
