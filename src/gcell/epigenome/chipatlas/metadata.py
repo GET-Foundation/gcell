@@ -246,10 +246,15 @@ class ChipAtlasMetadata:
             raise ValueError(f"Unknown metadata file: {name}")
 
         # Parse with on_bad_lines='skip' to handle potential issues
+        # Use index_col=False to prevent pandas from using extra columns as index
+        # Use usecols to only read the columns we need (files may have extra fields)
+        num_cols = len(columns_map[name])
         df = pd.read_csv(
             io.BytesIO(content),
             sep="\t",
             names=columns_map[name],
+            usecols=range(num_cols),
+            index_col=False,
             dtype=str,
             na_values=["", "-"],
             low_memory=False,
