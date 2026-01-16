@@ -4,18 +4,15 @@
 
 ## Building the docs
 
-To build the docs, run `hatch run docs:build`.
-Afterwards, you can run `hatch run docs:open` to open {file}`docs/_build/html/index.html`.
+To build the docs, run `uv run sphinx-build docs docs/_build`.
+Afterwards, open {file}`docs/_build/html/index.html` in your browser.
 
 Your browser and Sphinx cache docs which have been built previously.
 Sometimes these caches are not invalidated when you've updated the docs.
 If docs are not updating the way you expect, first try "force reloading" your browser page – e.g. reload the page without using the cache.
-Next, if problems persist, clear the sphinx cache (`hatch run docs:clean`) and try building them again.
+Next, if problems persist, clear the sphinx cache (`rm -rf docs/_build`) and try building them again.
 
 ## Adding to the docs
-
-For any user-visible changes, please make sure a note has been added to the release notes using [`hatch run towncrier:create`][towncrier create].
-We recommend waiting on this until your PR is close to done since this can often causes merge conflicts.
 
 Once you've added a new function to the documentation, you'll need to make sure there is a link somewhere in the documentation site pointing to it.
 This should be added to `docs/api.md` under a relevant heading.
@@ -27,7 +24,6 @@ To update the submodule, run `git submodule update --remote` from the root of th
 Subsequently, commit and push the changes in a PR.
 This should be done before each release to ensure the tutorials are up to date.
 
-[towncrier create]: https://towncrier.readthedocs.io/en/stable/tutorial.html#creating-news-fragments
 [gcell-tutorials]: https://github.com/GET-Foundation/gcell-tutorials/
 
 ## docstrings format

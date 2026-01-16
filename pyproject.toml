@@ -74,7 +74,6 @@ dev = [
     "setuptools_scm",
     # static checking
     "pre-commit",
-    "towncrier",
     "ipykernel",
     "jupyter",
     "jupyter-packaging",
@@ -104,7 +103,6 @@ doc = [
     "matplotlib!=3.6.1",
     "sphinxcontrib-bibtex",
     "setuptools", # undeclared dependency of sphinxcontrib-bibtex→pybtex
-    "towncrier",
 ]
 gpu = [
     #"esm",
@@ -187,33 +185,3 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["gcell"]
-
-[tool.towncrier]
-package = "gcell"
-directory = "docs/release-notes"
-filename = "docs/release-notes/{version}.md"
-single_file = false
-package_dir = "src"
-issue_format = "{{pr}}`{issue}`"
-title_format = "(v{version})=\n### {version} {{small}}`{project_date}`"
-
-[tool.towncrier.fragment.bugfix]
-name = "Bug fixes"
-
-[tool.towncrier.fragment.doc]
-name = "Documentation"
-
-[tool.towncrier.fragment.feature]
-name = "Features"
-
-[tool.towncrier.fragment.misc]
-name = "Miscellaneous improvements"
-
-[tool.towncrier.fragment.performance]
-name = "Performance"
-
-[tool.towncrier.fragment.breaking]
-name = "Breaking changes"
-
-[tool.towncrier.fragment.dev]
-name = "Development Process"

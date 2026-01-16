@@ -6,7 +6,7 @@ That page also explains concepts like *pre-releases* and applications thereof.
 ## Preparing the release
 
 1. Switch to the `main` branch for a major/minor release and the respective release series branch for a *patch* release (e.g. `1.8.x` when releasing version 1.8.4).
-2. Run `hatch towncrier:build` to generate a PR that creates a new release notes file. Wait for the PR to be auto-merged.
+2. Update the release notes manually in `docs/release-notes/`.
 3. If it is a *patch* release, merge the backport PR (see {ref}`versioning-tooling`) into the `main` branch.
 
 ## Actually making the release
@@ -41,7 +41,7 @@ After a *major* or *minor* release has been made:
 
 ## Debugging the build process
 
-If you changed something about the build process (e.g. [Hatchling’s build configuration][hatch-build]),
+If you changed something about the build process,
 or something about the package’s structure,
 you might want to manually check if the build and upload process behaves as expected:
 
@@ -65,6 +65,5 @@ The above approximates what the [publish workflow][] does automatically for us.
 If you want to replicate the process more exactly, make sure you are careful,
 and create a version tag before building (make sure you delete it after uploading to TestPyPI!).
 
-[hatch-build]: https://hatch.pypa.io/latest/config/build/
 [testpypi tutorial]: https://packaging.python.org/en/latest/tutorials/packaging-projects/#uploading-the-distribution-archives
 [publish workflow]: https://github.com/GET-Foundation/gcell/tree/main/.github/workflows/publish.yml

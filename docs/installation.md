@@ -2,28 +2,9 @@
 
 To use `gcell` from another project, install it using your favourite environment manager:
 
-::::{tabs}
-
-:::{group-tab} Hatch (recommended)
-Adding `"gcell @ git+https://github.com/fuxialexander/gcell.git@main"` to your dependencies is enough.
-See below for how to use gcell’s {ref}`dev-install-instructions`.
-:::
-
-:::{group-tab} Pip/PyPI
-If you prefer to exclusively use PyPI run:
-
 ```console
 $ pip install git+https://github.com/GET-Foundation/gcell.git@main
 ```
-:::
-
-
-
-:::
-
-::::
-
-If you use Hatch or pip, the extra ...
 
 (dev-install-instructions)=
 
@@ -38,17 +19,12 @@ $ cd gcell
 
 ::::{tabs}
 
-:::{group-tab} Hatch (recommended)
-To use one of the predefined [Hatch environments][] in {file}`hatch.toml`,
-run either `hatch test [args]` or `hatch run [env:]command [...args]`, e.g.:
-
+:::{group-tab} uv (recommended)
 ```console
-$ hatch test -p               # run tests in parallel
-$ hatch run docs:build        # build docs
-$ hatch run towncrier:create  # create changelog entry
+$ uv sync --all-extras        # install all dependencies
+$ uv run pytest               # run tests
+$ uv run sphinx-build docs docs/_build  # build docs
 ```
-
-[hatch environments]: https://hatch.pypa.io/latest/tutorials/environment/basic-usage/
 :::
 
 :::{group-tab} Pip/PyPI

@@ -10,14 +10,15 @@ gcell is a Python library for genomic data analysis, focusing on cell type-speci
 
 ```bash
 # Environment setup
-hatch shell                    # Enter dev environment
+uv sync                        # Install dependencies
+uv sync --all-extras           # Install with all optional deps
 pre-commit install             # Install git hooks
 
 # Testing
-hatch test                     # Run all tests
-hatch test -p                  # Run tests in parallel
-hatch test -k "pattern"        # Run specific tests by pattern
-hatch test tests/gcell/dna/    # Run tests in specific directory
+uv run pytest                  # Run all tests
+uv run pytest -n auto          # Run tests in parallel
+uv run pytest -k "pattern"     # Run specific tests by pattern
+uv run pytest tests/gcell/dna/ # Run tests in specific directory
 
 # Code quality
 ruff check --fix .             # Fix linting issues
@@ -25,12 +26,10 @@ ruff format .                  # Format code
 pre-commit run --all-files     # Run all pre-commit hooks
 
 # Documentation
-hatch run docs:build           # Build Sphinx docs
-hatch run docs:open            # Open docs in browser
+uv run sphinx-build docs docs/_build  # Build Sphinx docs
 
-# Changelog (for releases)
-hatch run towncrier:create     # Create changelog entry
-hatch run towncrier:build      # Generate release notes
+# Running scripts
+uv run python script.py        # Run Python script in env
 ```
 
 ## Architecture
