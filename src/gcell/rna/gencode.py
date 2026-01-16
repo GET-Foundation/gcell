@@ -27,6 +27,17 @@ class Gencode(GTF):
 
     """
 
+    # Default GENCODE versions for each assembly
+    # Human uses numeric versions (e.g., 44), mouse uses M-prefixed versions
+    # mm10 (GRCm38) -> M10, mm39 (GRCm39) -> M35
+    DEFAULT_VERSIONS = {
+        "hg38": 44,
+        "hg19": 44,
+        "mm10": "M10",
+        "mm39": "M35",
+        "mm9": "M1",
+    }
+
     @classmethod
     def from_config(cls, config):
         """Create a Gencode instance from a configuration dictionary.
@@ -44,20 +55,26 @@ class Gencode(GTF):
         )
 
     def __init__(
-        self, assembly="hg38", version=40, is_basic=True, exclude_chrs=["chrM", "chrY"]
+        self, assembly="hg38", version=None, is_basic=True, exclude_chrs=["chrM", "chrY"]
     ):
         """Initialize the Gencode class.
 
         Parameters
         ----------
         assembly : str
-            Genome assembly version. Options: "hg38" (human), "mm10" (mouse), or "hg19" (human). Defaults to "hg38".
-        version : int
-            GENCODE release version. Defaults to 40.
+            Genome assembly version. Options: "hg38" (human), "hg19" (human),
+            "mm10" (mouse/GRCm38), "mm39" (mouse/GRCm39). Defaults to "hg38".
+        version : int or str, optional
+            GENCODE release version. For human: numeric (e.g., 44).
+            For mouse: M-prefixed string (e.g., "M10" for mm10, "M35" for mm39).
+            If None, uses default version for the assembly.
         exclude_chrs : list
             Chromosomes to exclude from the annotation. Defaults to ["chrM", "chrY"].
         """
         self.assembly = assembly
+        # Use default version if not specified
+        if version is None:
+            version = self.DEFAULT_VERSIONS.get(assembly, 44)
         self.version = version
         self.is_basic = is_basic
         self.gtf_dir = Path(_settings.get_setting("annotation_dir"))
@@ -82,22 +99,32 @@ class Gencode(GTF):
         from the GENCODE FTP server. The file is cached locally for future use.
 
         The URLs are constructed based on the assembly type:
-        - hg38: Current human genome assembly
-        - mm10: Mouse genome assembly
-        - hg19: Previous human genome assembly (GRCh37)
+        - hg38: Current human genome assembly (v44, etc.)
+        - hg19: Previous human genome assembly (GRCh37, liftover)
+        - mm10: Mouse GRCm38 assembly (M10, etc.)
+        - mm39: Mouse GRCm39 assembly (M35, etc.)
         """
+        version = self.version
+
         # Set up URLs based on assembly
-        if self.assembly == "hg38":
-            fname = f"gencode.v{self.version}.basic.annotation.gtf.gz"
-            url = f"http://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_{self.version}/{fname}"
-        elif self.assembly == "mm10":
-            fname = (
-                f"gencode.{self.assembly}.v{str(self.version)}.basic.annotation.gtf.gz"
-            )
-            url = f"http://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_{self.version}/gencode.v{self.version}.basic.annotation.gtf.gz"
+        if self.assembly in ("hg38",):
+            # Human current assembly
+            fname = f"gencode.v{version}.basic.annotation.gtf.gz"
+            url = f"http://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_{version}/{fname}"
         elif self.assembly == "hg19":
-            fname = f"gencode.v{str(self.version)}lift37.basic.annotation.gtf.gz"
-            url = f"https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_{self.version}/GRCh37_mapping/{fname}"
+            # Human GRCh37 liftover
+            fname = f"gencode.v{version}lift37.basic.annotation.gtf.gz"
+            url = f"https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_{version}/GRCh37_mapping/{fname}"
+        elif self.assembly in ("mm10", "mm39", "mm9"):
+            # Mouse assemblies use M-prefixed versions (e.g., M10, M35)
+            # Ensure version has M prefix
+            if not str(version).startswith("M"):
+                version = f"M{version}"
+            fname = f"gencode.v{version}.basic.annotation.gtf.gz"
+            url = f"http://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_{version}/{fname}"
+        else:
+            raise ValueError(f"Unsupported assembly: {self.assembly}. "
+                           f"Supported: hg38, hg19, mm10, mm39, mm9")
 
         if not self.is_basic:
             # replace .basic with ''
