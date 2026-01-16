@@ -37,7 +37,7 @@ dependencies = [
     "numpy",
     "omegaconf",
     "openpyxl",
-    "pandas",
+    "pandas>=2.2",
     "plotly",
     "pooch",
     "pyarrow",
@@ -108,7 +108,7 @@ doc = [
 ]
 gpu = [
     #"esm",
-    "culingam",
+    # culingam requires CUDA to install - install manually: pip install culingam
 ]
 torch = [
     "torch",
