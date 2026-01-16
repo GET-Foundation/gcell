@@ -24,10 +24,23 @@ from gcell.epigenome.chipatlas.enrichment import (
     EnrichmentResult,
 )
 from gcell.epigenome.chipatlas.query import ChipAtlas, ChipAtlasExperiment
+from gcell.epigenome.chipatlas.track_utils import (
+    compare_celltypes,
+    experiments_to_track,
+    peaks_to_bed_track,
+    search_and_plot,
+    stream_bigwig_region,
+)
 
 __all__ = [
     "ChipAtlas",
     "ChipAtlasExperiment",
     "ChipAtlasEnrichment",
     "EnrichmentResult",
+    # Track utilities
+    "stream_bigwig_region",
+    "experiments_to_track",
+    "search_and_plot",
+    "compare_celltypes",
+    "peaks_to_bed_track",
 ]
