@@ -115,6 +115,10 @@ def get_db_path() -> Path:
     return get_chipatlas_dir() / "chipatlas.db"
 
 
+# Default row limits for lite mode (enough for exploration)
+LITE_MODE_ROWS = 5000
+
+
 class ChipAtlasMetadata:
     """Manages ChIP-Atlas metadata with SQLite caching.
 
@@ -128,6 +132,13 @@ class ChipAtlasMetadata:
         If True, force re-download of metadata files. Default is False.
     max_workers : int, optional
         Maximum number of parallel download workers. Default is 4.
+    metadata_mode : {"full", "lite"}, optional
+        Mode for metadata caching:
+        - "full": Download complete metadata (~500MB). Slower first-time setup
+          but comprehensive coverage of all experiments.
+        - "lite": Download partial metadata (~1MB). Quick setup for exploration
+          but limited to ~5000 experiments per table.
+        Default is "full".
 
     Attributes
     ----------
@@ -136,24 +147,41 @@ class ChipAtlasMetadata:
 
     Examples
     --------
+    >>> # Full mode (default) - complete metadata
     >>> meta = ChipAtlasMetadata()
+
+    >>> # Lite mode - quick setup for exploration
+    >>> meta = ChipAtlasMetadata(metadata_mode="lite")
+
     >>> # Get all available antigens for human
     >>> antigens = meta.get_antigens(assembly="hg38")
-    >>> # Get all cell types for a specific antigen class
-    >>> celltypes = meta.get_celltypes(assembly="hg38", cell_type_class="Blood")
+
+    >>> # Upgrade from lite to full mode
+    >>> meta.upgrade_to_full()
     """
 
     def __init__(
         self,
         force_refresh: bool = False,
         max_workers: int = 4,
+        metadata_mode: str = "full",
         max_rows: int | None = None,
     ):
+        if metadata_mode not in ("full", "lite"):
+            raise ValueError("metadata_mode must be 'full' or 'lite'")
+
         self.db_path = get_db_path()
         self.max_workers = max_workers
-        self.max_rows = max_rows  # For testing with partial data
+        self.metadata_mode = metadata_mode
+        # max_rows overrides metadata_mode for testing
+        self.max_rows = max_rows
 
+        # Check if we need to initialize or upgrade
         if force_refresh or not self._db_exists():
+            self._initialize_db()
+        elif self._should_upgrade():
+            # User requested full mode but database is lite
+            print("Upgrading metadata from lite to full mode...")
             self._initialize_db()
 
     def _db_exists(self) -> bool:
@@ -178,10 +206,45 @@ class ChipAtlasMetadata:
         except sqlite3.Error:
             return False
 
+    def _should_upgrade(self) -> bool:
+        """Check if we should upgrade from lite to full mode."""
+        if self.metadata_mode != "full":
+            return False
+
+        # Check current mode in database
+        current_mode = self._get_stored_mode()
+        return current_mode == "lite"
+
+    def _get_stored_mode(self) -> str | None:
+        """Get the metadata mode stored in the database."""
+        if not self.db_path.exists():
+            return None
+
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    "SELECT value FROM metadata_info WHERE key = 'metadata_mode'"
+                )
+                row = cursor.fetchone()
+                return row[0] if row else None
+        except sqlite3.Error:
+            return None
+
     def _initialize_db(self) -> None:
         """Initialize the SQLite database with metadata."""
-        print("Initializing ChIP-Atlas metadata database...")
-        print("This may take a few minutes on first run.")
+        effective_mode = self.metadata_mode
+        if self.max_rows is not None:
+            effective_mode = "custom"
+
+        if effective_mode == "lite":
+            print("Initializing ChIP-Atlas metadata database (lite mode)...")
+            print("Downloading ~1MB of metadata for quick exploration.")
+            print("Use upgrade_to_full() or metadata_mode='full' for complete data.")
+        elif effective_mode == "full":
+            print("Initializing ChIP-Atlas metadata database (full mode)...")
+            print("Downloading complete metadata (~500MB). This may take a few minutes.")
+        else:
+            print("Initializing ChIP-Atlas metadata database...")
 
         # Download all metadata files in parallel
         metadata = self._download_all_metadata()
@@ -191,11 +254,20 @@ class ChipAtlasMetadata:
             self._create_tables(conn)
             self._populate_tables(conn, metadata)
             self._create_indexes(conn)
+            # Store metadata mode
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata_info VALUES (?, ?)",
+                ("metadata_mode", effective_mode),
+            )
 
         print("ChIP-Atlas metadata database initialized successfully.")
 
     def _download_metadata_file(
-        self, name: str, url: str, max_bytes: int | None = None
+        self,
+        name: str,
+        url: str,
+        max_bytes: int | None = None,
+        max_rows: int | None = None,
     ) -> tuple[str, pd.DataFrame]:
         """Download and parse a single metadata file.
 
@@ -208,6 +280,8 @@ class ChipAtlasMetadata:
         max_bytes : int, optional
             Maximum bytes to download (for streaming partial data).
             If None, downloads the full file.
+        max_rows : int, optional
+            Maximum rows to keep after parsing.
         """
         import urllib.request
 
@@ -262,8 +336,8 @@ class ChipAtlasMetadata:
         )
 
         # Apply max_rows limit if specified
-        if self.max_rows is not None and len(df) > self.max_rows:
-            df = df.head(self.max_rows)
+        if max_rows is not None and len(df) > max_rows:
+            df = df.head(max_rows)
 
         return name, df
 
@@ -271,16 +345,21 @@ class ChipAtlasMetadata:
         """Download all metadata files in parallel."""
         metadata = {}
 
+        # Determine row limit based on mode
+        max_rows = self.max_rows  # Explicit max_rows takes precedence
+        if max_rows is None and self.metadata_mode == "lite":
+            max_rows = LITE_MODE_ROWS
+
         # Calculate max_bytes if max_rows is set
         # Estimate ~500 bytes per row for experiment data
         max_bytes = None
-        if self.max_rows is not None:
-            max_bytes = self.max_rows * 500
+        if max_rows is not None:
+            max_bytes = max_rows * 500
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {
                 executor.submit(
-                    self._download_metadata_file, name, url, max_bytes
+                    self._download_metadata_file, name, url, max_bytes, max_rows
                 ): name
                 for name, url in METADATA_FILES.items()
             }
@@ -692,3 +771,38 @@ class ChipAtlasMetadata:
     def refresh(self) -> None:
         """Force refresh of the metadata database."""
         self._initialize_db()
+
+    def upgrade_to_full(self) -> None:
+        """Upgrade from lite mode to full metadata.
+
+        Downloads the complete metadata if currently in lite mode.
+        """
+        current_mode = self._get_stored_mode()
+        if current_mode == "full":
+            print("Metadata is already in full mode.")
+            return
+
+        print("Upgrading metadata from lite to full mode...")
+        self.metadata_mode = "full"
+        self._initialize_db()
+
+    def get_mode(self) -> str:
+        """Get the current metadata mode.
+
+        Returns
+        -------
+        str
+            Current mode: "full", "lite", or "unknown"
+        """
+        mode = self._get_stored_mode()
+        return mode if mode else "unknown"
+
+    def is_lite_mode(self) -> bool:
+        """Check if database is in lite mode.
+
+        Returns
+        -------
+        bool
+            True if in lite mode, False otherwise
+        """
+        return self._get_stored_mode() == "lite"

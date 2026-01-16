@@ -469,3 +469,122 @@ class TestThresholdMap:
     def test_threshold_keys(self):
         """Test threshold keys."""
         assert set(THRESHOLD_MAP.keys()) == {5, 10, 20}
+
+
+class TestMetadataMode:
+    """Tests for metadata mode functionality."""
+
+    def test_invalid_metadata_mode(self):
+        """Test that invalid metadata_mode raises ValueError."""
+        with pytest.raises(ValueError, match="metadata_mode must be"):
+            ChipAtlasMetadata(metadata_mode="invalid")
+
+    def test_metadata_mode_stored_in_db(self, tmp_path):
+        """Test that metadata mode is stored in the database."""
+        db_path = tmp_path / "test_chipatlas.db"
+
+        # Create mock database with mode stored
+        with sqlite3.connect(db_path) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE experiments (
+                    experiment_id TEXT PRIMARY KEY,
+                    assembly TEXT NOT NULL,
+                    antigen_class TEXT,
+                    antigen TEXT,
+                    cell_type_class TEXT,
+                    cell_type TEXT,
+                    cell_type_description TEXT,
+                    processing_logs TEXT,
+                    title TEXT,
+                    metadata TEXT
+                );
+
+                CREATE TABLE files (
+                    file_name TEXT PRIMARY KEY,
+                    assembly TEXT NOT NULL,
+                    antigen_class TEXT,
+                    antigen TEXT,
+                    cell_type_class TEXT,
+                    cell_type TEXT,
+                    threshold INTEGER,
+                    experiment_ids TEXT
+                );
+
+                CREATE TABLE antigens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    assembly TEXT NOT NULL,
+                    antigen_class TEXT,
+                    antigen TEXT,
+                    experiment_count INTEGER,
+                    experiment_ids TEXT
+                );
+
+                CREATE TABLE celltypes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    assembly TEXT NOT NULL,
+                    cell_type_class TEXT,
+                    cell_type TEXT,
+                    experiment_count INTEGER,
+                    experiment_ids TEXT
+                );
+
+                CREATE TABLE metadata_info (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );
+            """
+            )
+
+            # Store mode as "lite"
+            conn.execute(
+                "INSERT INTO metadata_info VALUES (?, ?)",
+                ("metadata_mode", "lite"),
+            )
+            conn.execute(
+                "INSERT INTO metadata_info VALUES (?, ?)",
+                ("last_updated", "2024-01-01T00:00:00Z"),
+            )
+
+        # Test reading mode from database
+        with patch(
+            "gcell.epigenome.chipatlas.metadata.get_db_path", return_value=db_path
+        ):
+            meta = ChipAtlasMetadata.__new__(ChipAtlasMetadata)
+            meta.db_path = db_path
+            meta.max_workers = 4
+
+            assert meta._get_stored_mode() == "lite"
+            assert meta.is_lite_mode() is True
+
+    def test_chipatlas_metadata_mode_property(self, tmp_path):
+        """Test ChipAtlas metadata_mode and is_lite_mode properties."""
+        db_path = tmp_path / "test_chipatlas.db"
+
+        # Create mock database
+        with sqlite3.connect(db_path) as conn:
+            conn.executescript(
+                """
+                CREATE TABLE experiments (experiment_id TEXT PRIMARY KEY, assembly TEXT);
+                CREATE TABLE files (file_name TEXT PRIMARY KEY, assembly TEXT);
+                CREATE TABLE antigens (id INTEGER PRIMARY KEY, assembly TEXT);
+                CREATE TABLE celltypes (id INTEGER PRIMARY KEY, assembly TEXT);
+                CREATE TABLE metadata_info (key TEXT PRIMARY KEY, value TEXT);
+            """
+            )
+            conn.execute(
+                "INSERT INTO metadata_info VALUES (?, ?)",
+                ("metadata_mode", "full"),
+            )
+
+        with (
+            patch(
+                "gcell.epigenome.chipatlas.metadata.get_db_path", return_value=db_path
+            ),
+            patch.object(ChipAtlasMetadata, "_db_exists", return_value=True),
+        ):
+            ca = ChipAtlas(cache_dir=tmp_path)
+            ca.metadata.db_path = db_path
+
+            assert ca.metadata_mode == "full"
+            assert ca.is_lite_mode is False

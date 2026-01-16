@@ -175,11 +175,30 @@ class ChipAtlas:
         Maximum number of parallel workers for downloads. Default is 4.
     cache_dir : str | Path, optional
         Directory for caching downloaded files. Default is the gcell cache.
+    metadata_mode : {"full", "lite"}, optional
+        Mode for metadata caching:
+        - "full": Download complete metadata (~500MB). Slower first-time setup
+          but comprehensive coverage of all experiments. Default.
+        - "lite": Download partial metadata (~1MB). Quick setup for exploration
+          but limited to ~5000 experiments per table.
 
     Examples
     --------
     >>> from gcell.epigenome import ChipAtlas
-    >>> ca = ChipAtlas()
+
+    Quick exploration with lite mode:
+
+    >>> # Fast setup for exploration (~1MB download)
+    >>> ca = ChipAtlas(metadata_mode="lite")
+    >>> antigens = ca.get_antigens(assembly="hg38")
+
+    >>> # Upgrade to full when ready
+    >>> ca.upgrade_metadata()
+
+    Full mode (default) for comprehensive queries:
+
+    >>> # Complete metadata (~500MB, one-time download)
+    >>> ca = ChipAtlas()  # or ChipAtlas(metadata_mode="full")
 
     Search for experiments:
 
@@ -219,11 +238,13 @@ class ChipAtlas:
         force_refresh: bool = False,
         max_workers: int = 4,
         cache_dir: str | Path | None = None,
+        metadata_mode: str = "full",
         max_rows: int | None = None,
     ):
         self.metadata = ChipAtlasMetadata(
             force_refresh=force_refresh,
             max_workers=max_workers,
+            metadata_mode=metadata_mode,
             max_rows=max_rows,
         )
         self.max_workers = max_workers
@@ -783,3 +804,28 @@ class ChipAtlas:
     def refresh_metadata(self) -> None:
         """Force refresh of the metadata database."""
         self.metadata.refresh()
+
+    def upgrade_metadata(self) -> None:
+        """Upgrade from lite mode to full metadata.
+
+        Downloads the complete metadata if currently in lite mode.
+        This is useful when you started with lite mode for quick exploration
+        and now need comprehensive coverage.
+
+        Examples
+        --------
+        >>> ca = ChipAtlas(metadata_mode="lite")  # Quick start
+        >>> # ... explore data ...
+        >>> ca.upgrade_metadata()  # Download full metadata when ready
+        """
+        self.metadata.upgrade_to_full()
+
+    @property
+    def metadata_mode(self) -> str:
+        """Current metadata mode ('full', 'lite', or 'unknown')."""
+        return self.metadata.get_mode()
+
+    @property
+    def is_lite_mode(self) -> bool:
+        """Check if using lite mode (partial metadata)."""
+        return self.metadata.is_lite_mode()

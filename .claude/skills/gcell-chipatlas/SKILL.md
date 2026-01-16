@@ -28,6 +28,53 @@ experiments = ca.search(antigen="TP53", assembly="hg38")
 print(f"Found {len(experiments)} TP53 experiments")
 ```
 
+## Metadata Modes
+
+On first use, ChipAtlas downloads metadata to enable fast local queries. Choose the mode that fits your needs:
+
+### Lite Mode (Quick Setup)
+
+```python
+# Fast setup (~1MB download) for exploration
+ca = ChipAtlas(metadata_mode="lite")
+
+# Limited to ~5000 experiments per table, but instant setup
+antigens = ca.get_antigens(assembly="hg38")
+
+# Check current mode
+print(f"Mode: {ca.metadata_mode}")  # "lite"
+
+# Upgrade to full when ready for comprehensive queries
+ca.upgrade_metadata()
+```
+
+### Full Mode (Default, Comprehensive)
+
+```python
+# Complete metadata (~500MB, one-time download)
+ca = ChipAtlas()  # or ChipAtlas(metadata_mode="full")
+
+# Covers all experiments in ChIP-Atlas
+# Takes a few minutes on first run, but only needs to download once
+```
+
+### When to Use Each Mode
+
+| Mode | Download Size | Use Case |
+|------|--------------|----------|
+| `lite` | ~1MB | Quick exploration, testing, demos |
+| `full` | ~500MB | Production queries, comprehensive searches |
+
+### Refresh Metadata
+
+```python
+# Force re-download (e.g., to get latest experiments)
+ca = ChipAtlas(force_refresh=True)
+
+# Or refresh existing instance
+ca.refresh_metadata()
+```
+
 ## Searching for Experiments
 
 ### By Transcription Factor / Antigen
