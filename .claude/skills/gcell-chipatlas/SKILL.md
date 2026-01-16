@@ -310,3 +310,145 @@ for ct in cell_types:
     )
     print(f"{ct}: {len(exps)} experiments")
 ```
+
+## Track Visualization (Integration with gcell.dna.Track)
+
+ChIP-Atlas integrates with gcell's Track class for BigWig visualization.
+
+### Stream BigWig Data
+
+```python
+from gcell.epigenome.chipatlas import stream_bigwig_region
+
+# Stream directly from ChIP-Atlas URL (no download needed)
+url = "https://chip-atlas.dbcls.jp/data/hg38/eachData/bw/SRX190161.bw"
+signal = stream_bigwig_region(url, "chr1", 1000000, 1100000)
+print(f"Signal shape: {signal.shape}")
+```
+
+### Create Track from Experiments
+
+```python
+from gcell.epigenome import ChipAtlas
+from gcell.epigenome.chipatlas import experiments_to_track
+
+ca = ChipAtlas()
+
+# Search for experiments
+experiments = ca.search(
+    antigen="H3K27ac",
+    cell_type="K562",
+    assembly="hg38",
+    as_experiments=True,
+    limit=3
+)
+
+# Create Track object for visualization
+track = experiments_to_track(
+    experiments,
+    chrom="chr8",
+    start=127735000,
+    end=127745000,  # MYC locus
+)
+
+# Plot tracks
+track.plot_tracks()
+```
+
+### Quick Search and Plot
+
+```python
+from gcell.epigenome.chipatlas import search_and_plot
+
+# Search and plot in one step
+track, fig, axes = search_and_plot(
+    antigen="H3K27ac",
+    cell_type="K562",
+    assembly="hg38",
+    chrom="chr8",
+    start=127735000,
+    end=127745000,
+    limit=3,
+)
+```
+
+### Compare Cell Types with Track Visualization
+
+```python
+from gcell.epigenome.chipatlas import compare_celltypes
+
+# Compare H3K27ac across cell types
+track, fig, axes = compare_celltypes(
+    antigen="H3K27ac",
+    cell_types=["K562", "HepG2", "GM12878"],
+    chrom="chr8",
+    start=127735000,
+    end=127745000,
+)
+```
+
+### Add Gene Annotations
+
+```python
+from gcell.rna import Gencode
+from gcell.epigenome.chipatlas import experiments_to_track
+
+# Load gene annotations
+gencode = Gencode(assembly="hg38")
+
+# Create track
+track = experiments_to_track(
+    experiments,
+    chrom="chr8",
+    start=127735000,
+    end=127745000,
+)
+
+# Plot with gene track
+track.plot_tracks_with_genebody(
+    gene_annot=gencode,
+    genes_to_highlight=["MYC"],
+)
+```
+
+### Combine with Peak Data
+
+```python
+from gcell.epigenome.chipatlas import peaks_to_bed_track
+
+# Get binary peak track
+peak_track = peaks_to_bed_track(
+    experiments,
+    chrom="chr8",
+    start=127735000,
+    end=127745000,
+    threshold=10,
+)
+
+# Add to visualization as BED regions
+import numpy as np
+peaks = np.where(peak_track > 0)[0]
+# Use with track.plot_tracks(beds=[peak_regions])
+```
+
+### Stream vs Cache
+
+```python
+# Option 1: Stream directly (no disk usage, slower for repeated access)
+track = experiments_to_track(
+    experiments,
+    chrom="chr8",
+    start=127735000,
+    end=127745000,
+    use_cache=False,  # Stream from URL
+)
+
+# Option 2: Download and cache (faster for repeated access)
+track = experiments_to_track(
+    experiments,
+    chrom="chr8",
+    start=127735000,
+    end=127745000,
+    use_cache=True,  # Download first, then read locally
+)
+```
