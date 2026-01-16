@@ -219,10 +219,12 @@ class ChipAtlas:
         force_refresh: bool = False,
         max_workers: int = 4,
         cache_dir: str | Path | None = None,
+        max_rows: int | None = None,
     ):
         self.metadata = ChipAtlasMetadata(
             force_refresh=force_refresh,
             max_workers=max_workers,
+            max_rows=max_rows,
         )
         self.max_workers = max_workers
         self._cache_dir = Path(cache_dir) if cache_dir else get_chipatlas_dir()

@@ -143,9 +143,15 @@ class ChipAtlasMetadata:
     >>> celltypes = meta.get_celltypes(assembly="hg38", cell_type_class="Blood")
     """
 
-    def __init__(self, force_refresh: bool = False, max_workers: int = 4):
+    def __init__(
+        self,
+        force_refresh: bool = False,
+        max_workers: int = 4,
+        max_rows: int | None = None,
+    ):
         self.db_path = get_db_path()
         self.max_workers = max_workers
+        self.max_rows = max_rows  # For testing with partial data
 
         if force_refresh or not self._db_exists():
             self._initialize_db()
@@ -188,66 +194,71 @@ class ChipAtlasMetadata:
 
         print("ChIP-Atlas metadata database initialized successfully.")
 
-    def _download_metadata_file(self, name: str, url: str) -> tuple[str, pd.DataFrame]:
-        """Download and parse a single metadata file."""
+    def _download_metadata_file(
+        self, name: str, url: str, max_bytes: int | None = None
+    ) -> tuple[str, pd.DataFrame]:
+        """Download and parse a single metadata file.
+
+        Parameters
+        ----------
+        name : str
+            Name of the metadata file
+        url : str
+            URL to download from
+        max_bytes : int, optional
+            Maximum bytes to download (for streaming partial data).
+            If None, downloads the full file.
+        """
         import urllib.request
 
         print(f"  Downloading {name}...")
 
         try:
-            with urllib.request.urlopen(url, timeout=60) as response:
+            req = urllib.request.Request(url)
+            if max_bytes is not None:
+                # Use HTTP Range header for partial download
+                req.add_header("Range", f"bytes=0-{max_bytes}")
+
+            with urllib.request.urlopen(req, timeout=60) as response:
                 content = response.read()
         except Exception as e:
             raise RuntimeError(f"Failed to download {name}: {e}") from e
 
-        # Parse based on file type
-        if name == "experimentList":
-            df = pd.read_csv(
-                io.BytesIO(content),
-                sep="\t",
-                names=EXPERIMENT_COLUMNS,
-                dtype=str,
-                na_values=["", "-"],
-                low_memory=False,
-            )
-        elif name == "fileList":
-            df = pd.read_csv(
-                io.BytesIO(content),
-                sep="\t",
-                names=FILE_COLUMNS,
-                dtype=str,
-                na_values=["", "-"],
-                low_memory=False,
-            )
-        elif name == "antigenList":
-            df = pd.read_csv(
-                io.BytesIO(content),
-                sep="\t",
-                names=ANTIGEN_COLUMNS,
-                dtype=str,
-                na_values=["", "-"],
-                low_memory=False,
-            )
-        elif name == "celltypeList":
-            df = pd.read_csv(
-                io.BytesIO(content),
-                sep="\t",
-                names=CELLTYPE_COLUMNS,
-                dtype=str,
-                na_values=["", "-"],
-                low_memory=False,
-            )
-        elif name == "analysisList":
-            df = pd.read_csv(
-                io.BytesIO(content),
-                sep="\t",
-                names=ANALYSIS_COLUMNS,
-                dtype=str,
-                na_values=["", "-"],
-                low_memory=False,
-            )
-        else:
+        # If partial download, remove potentially incomplete last line
+        if max_bytes is not None:
+            content_str = content.decode("utf-8", errors="ignore")
+            lines = content_str.split("\n")
+            # Remove last line if it might be incomplete
+            if lines and not content_str.endswith("\n"):
+                lines = lines[:-1]
+            content = "\n".join(lines).encode("utf-8")
+
+        # Column definitions for each file type
+        columns_map = {
+            "experimentList": EXPERIMENT_COLUMNS,
+            "fileList": FILE_COLUMNS,
+            "antigenList": ANTIGEN_COLUMNS,
+            "celltypeList": CELLTYPE_COLUMNS,
+            "analysisList": ANALYSIS_COLUMNS,
+        }
+
+        if name not in columns_map:
             raise ValueError(f"Unknown metadata file: {name}")
+
+        # Parse with on_bad_lines='skip' to handle potential issues
+        df = pd.read_csv(
+            io.BytesIO(content),
+            sep="\t",
+            names=columns_map[name],
+            dtype=str,
+            na_values=["", "-"],
+            low_memory=False,
+            on_bad_lines="skip",
+        )
+
+        # Apply max_rows limit if specified
+        if self.max_rows is not None and len(df) > self.max_rows:
+            df = df.head(self.max_rows)
 
         return name, df
 
@@ -255,9 +266,17 @@ class ChipAtlasMetadata:
         """Download all metadata files in parallel."""
         metadata = {}
 
+        # Calculate max_bytes if max_rows is set
+        # Estimate ~500 bytes per row for experiment data
+        max_bytes = None
+        if self.max_rows is not None:
+            max_bytes = self.max_rows * 500
+
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {
-                executor.submit(self._download_metadata_file, name, url): name
+                executor.submit(
+                    self._download_metadata_file, name, url, max_bytes
+                ): name
                 for name, url in METADATA_FILES.items()
             }
 
@@ -344,7 +363,7 @@ class ChipAtlasMetadata:
 
         # Antigens
         if "antigenList" in metadata:
-            df = metadata["antigenList"].dropna(subset=["antigen"])
+            df = metadata["antigenList"].dropna(subset=["antigen"]).copy()
             df["experiment_count"] = pd.to_numeric(
                 df["experiment_count"], errors="coerce"
             )
@@ -352,7 +371,7 @@ class ChipAtlasMetadata:
 
         # Cell types
         if "celltypeList" in metadata:
-            df = metadata["celltypeList"].dropna(subset=["cell_type"])
+            df = metadata["celltypeList"].dropna(subset=["cell_type"]).copy()
             df["experiment_count"] = pd.to_numeric(
                 df["experiment_count"], errors="coerce"
             )
