@@ -372,8 +372,10 @@ class Track:
         )
 
         plt.tight_layout()
+        # Adjust left margin to prevent label cropping
+        plt.subplots_adjust(left=0.2)
         if out_file is not None:
-            plt.savefig(out_file)
+            plt.savefig(out_file, bbox_inches="tight")
         else:
             plt.show()
 
@@ -433,6 +435,429 @@ class Track:
 
         # Plot tracks with motif density
         self.plot_tracks(**kwargs)
+
+    def plot_tracks_with_genebody(
+        self,
+        color_dict=None,
+        gene_annot=None,
+        genes_to_highlight=None,
+        beds=None,
+        out_file=None,
+        center=False,
+        protein_coding_only=False,
+        isoforms=False,
+        gene_track_height=1,
+        track_order=None,
+        autoscale=False,
+        group_autoscale=None,
+    ):
+        """
+        Plot the tracks with detailed gene structure visualization.
+
+        Parameters
+        ----------
+        color_dict : dict, optional
+            A dictionary mapping track labels to colors. Defaults to None.
+        gene_annot : Gencode, optional
+            A Gencode object containing gene annotations. Defaults to None.
+        genes_to_highlight : list, optional
+            A list of gene names to highlight. Defaults to None.
+        beds : list, optional
+            A list of BED objects containing regions to plot. Defaults to None.
+        out_file : str, optional
+            The path to save the output plot. Defaults to None.
+        center : bool, optional
+            Whether to center the y-axis around the mean. Defaults to False.
+        protein_coding_only : bool, optional
+            Whether to show only protein-coding genes. Defaults to False.
+        isoforms : bool, optional
+            Whether to show individual transcript isoforms. Defaults to False.
+        gene_track_height : float, optional
+            Height of the gene track relative to signal tracks. Defaults to 1.
+        track_order : list, optional
+            List of track labels specifying the order in which to plot the tracks.
+            If not provided, tracks will be plotted in their default order.
+        autoscale : bool, optional
+            Whether to normalize each track to its maximum value in the displayed region.
+            Defaults to False.
+        group_autoscale : dict or list, optional
+            Groups for autoscaling. If dict, maps group names to lists of track IDs.
+            If list of lists, each sublist contains track IDs for a group.
+            Each group is normalized to the maximum value across group members.
+            Defaults to None.
+
+        Returns
+        -------
+        tuple
+            A tuple containing the matplotlib figure and list of axes.
+        """
+        # If track_order is provided, validate and use it
+        if track_order is not None:
+            invalid_tracks = [t for t in track_order if t not in self.convoluted_tracks]
+            if invalid_tracks:
+                raise ValueError(f"Invalid track(s) specified in track_order: {invalid_tracks}")
+            tracks_to_plot = {k: self.convoluted_tracks[k] for k in track_order}
+        else:
+            tracks_to_plot = self.convoluted_tracks
+
+        num_tracks = len(tracks_to_plot)
+        additional_tracks = 0
+        num_subplots = num_tracks
+        if isinstance(beds, np.ndarray):
+            beds = [beds]
+        if beds is not None:
+            num_subplots += len(beds)
+            additional_tracks += len(beds)
+
+        if gene_annot is not None:
+            num_subplots += 1
+            additional_tracks += 1
+
+        fig = plt.figure(
+            figsize=(8, 1 * num_tracks + gene_track_height * additional_tracks)
+        )
+
+        height_ratios = [1] * num_tracks
+        if beds is not None:
+            height_ratios.extend([0.2] * len(beds))
+        if gene_annot is not None:
+            height_ratios.append(gene_track_height)
+
+        gs = gridspec.GridSpec(num_subplots, 1, height_ratios=height_ratios)
+        gs.update(hspace=0.5)
+
+        if color_dict is None:
+            colors = plt.cm.tab10.colors
+            color_dict = {
+                label: colors[i % 10]
+                for i, label in enumerate(tracks_to_plot.keys())
+            }
+
+        # Handle autoscaling
+        scaling_factors = {}
+        group_names = {}
+
+        if group_autoscale is not None:
+            if isinstance(group_autoscale, dict):
+                groups = group_autoscale
+            elif isinstance(group_autoscale, list):
+                groups = {f"Group_{i+1}": group for i, group in enumerate(group_autoscale)}
+            else:
+                raise ValueError("group_autoscale must be a dict or list of lists")
+
+            for group_name, track_ids in groups.items():
+                group_tracks = {k: v for k, v in tracks_to_plot.items() if k in track_ids}
+                if group_tracks:
+                    group_max = max([max(y) for y in group_tracks.values()])
+                    if group_max > 0:
+                        for track_id in group_tracks.keys():
+                            scaling_factors[track_id] = 1.0 / group_max
+                            group_names[track_id] = group_name
+
+        elif autoscale:
+            for label, y in tracks_to_plot.items():
+                track_max = max(y)
+                if track_max > 0:
+                    scaling_factors[label] = 1.0 / track_max
+
+        if scaling_factors:
+            tracks_to_plot = {
+                label: y * scaling_factors.get(label, 1.0)
+                for label, y in tracks_to_plot.items()
+            }
+
+        max_y = max([max(y) for y in tracks_to_plot.values()])
+        if center:
+            mean_y = np.stack([y for y in tracks_to_plot.values()]).mean(axis=0)
+            if len(mean_y) > 1e5:
+                mean_y = mean_y[::100]
+
+        axes = []
+        for i, (label, y_conv) in enumerate(tracks_to_plot.items()):
+            ax = fig.add_subplot(
+                gs[i],
+                sharex=axes[0] if axes else None,
+                sharey=axes[0] if axes else None,
+            )
+            x = np.arange(self.start, self.end)
+            if len(x) > 1e5:
+                x = x[::100]
+                y_conv = y_conv[::100]
+
+            if center:
+                y_conv = y_conv - mean_y
+
+            ax.fill_between(x, y_conv, color=color_dict[label])
+
+            ylabel = label
+            if label in group_names:
+                ylabel = f"{group_names[label]}\n{label}"
+
+            ax.set_ylabel(
+                ylabel,
+                rotation=0,
+                color=color_dict[label],
+                ha="right",
+                fontsize=12,
+                va="center",
+            )
+            ax.set_xlabel("")
+            ax.set_xticks([])
+            if center:
+                ax.set_ylim(bottom=-max_y, top=max_y)
+            else:
+                ax.set_ylim(bottom=0, top=max_y)
+            ax.set_xlim(self.start, self.end)
+            axes.append(ax)
+
+        y_max_lim = fig.get_axes()[-1].get_ylim()[1]
+
+        gs.update(hspace=0.2)
+        if beds is not None:
+            for bed in beds:
+                if isinstance(bed, pd.DataFrame):
+                    bed = bed.query(
+                        "Chromosome==@self.chrom & Start>@self.start & End<@self.end"
+                    )[["Start", "End"]].values
+                filtered_bed = bed[(bed[:, 0] > self.start) & (bed[:, 1] < self.end)]
+                ax_bed = fig.add_subplot(gs[-additional_tracks], sharex=axes[0])
+                for start, end in filtered_bed:
+                    ax_bed.fill_between(
+                        [start, end], 0, y_max_lim, color="lightgray", alpha=1
+                    )
+
+                ax_bed.set_yticks([])
+                ax_bed.set_ylabel("")
+                ax_bed.set_xlabel("")
+                ax_bed.set_xticks([])
+                additional_tracks -= 1
+
+        # Plot gene structures if annotation is provided
+        if gene_annot is not None:
+            gtf = gene_annot.original_gtf
+            ax_gene = fig.add_subplot(gs[-1], sharex=axes[0])
+
+            region_gtf = gtf[
+                (gtf["Chromosome"] == self.chrom)
+                & (gtf["End"] >= self.start)
+                & (gtf["Start"] <= self.end)
+            ].copy()
+
+            if protein_coding_only:
+                if "gene_type" in region_gtf.columns:
+                    region_gtf = region_gtf[region_gtf["gene_type"] == "protein_coding"]
+                elif "gene_biotype" in region_gtf.columns:
+                    region_gtf = region_gtf[region_gtf["gene_biotype"] == "protein_coding"]
+
+            if genes_to_highlight is not None:
+                region_gtf = region_gtf[region_gtf["gene_name"].isin(genes_to_highlight)]
+
+            if not region_gtf.empty:
+                gene_rows = region_gtf[region_gtf["Feature"] == "gene"]
+                feature_info = []
+
+                if isoforms:
+                    for _, gene_row in gene_rows.iterrows():
+                        gene_name = gene_row["gene_name"]
+                        gene_data = region_gtf[region_gtf["gene_id"] == gene_row["gene_id"]]
+                        transcripts = gene_data[gene_data["Feature"] == "transcript"]
+
+                        for _, transcript in transcripts.iterrows():
+                            feature_info.append({
+                                "name": transcript.get("transcript_name", transcript["transcript_id"]),
+                                "gene_name": gene_name,
+                                "start": max(self.start, transcript["Start"]),
+                                "end": min(self.end, transcript["End"]),
+                                "strand": transcript["Strand"],
+                                "data": gene_data[gene_data["transcript_id"] == transcript["transcript_id"]],
+                            })
+                else:
+                    for _, gene_row in gene_rows.iterrows():
+                        gene_name = gene_row["gene_name"]
+                        gene_data = region_gtf[region_gtf["gene_id"] == gene_row["gene_id"]]
+                        feature_info.append({
+                            "name": gene_name,
+                            "gene_name": gene_name,
+                            "start": max(self.start, gene_row["Start"]),
+                            "end": min(self.end, gene_row["End"]),
+                            "strand": gene_row["Strand"],
+                            "data": gene_data,
+                        })
+
+                # Calculate optimal track assignments
+                tracks_list = []
+                track_assignments = {}
+
+                def overlaps_with_track(feature, track, padding=0.1):
+                    feature_start = feature["start"]
+                    feature_end = feature["end"]
+                    feature_name = feature["name"]
+                    name_width = len(feature_name) * (self.end - self.start) * 0.015
+                    label_padding = (self.end - self.start) * padding
+
+                    for existing in track:
+                        existing_name = existing["name"]
+                        existing_name_width = len(existing_name) * (self.end - self.start) * 0.015
+
+                        if feature_start <= existing["end"] and feature_end >= existing["start"]:
+                            return True
+
+                        if feature_start < self.start and existing["start"] < self.start:
+                            return True
+
+                        if feature_start < self.start and existing["start"] >= self.start:
+                            if min(self.end, feature_end) + name_width > existing["start"] - existing_name_width - label_padding:
+                                return True
+
+                        if existing["start"] < self.start and feature_start >= self.start:
+                            if min(self.end, existing["end"]) + existing_name_width > feature_start - name_width - label_padding:
+                                return True
+
+                        if feature_start >= self.start and existing["start"] >= self.start:
+                            left_extent1 = feature_start - name_width - label_padding
+                            left_extent2 = existing["start"] - existing_name_width - label_padding
+
+                            if (left_extent1 <= existing["end"] and feature_start >= existing["start"]) or \
+                               (left_extent2 <= feature_end and existing["start"] >= feature_start):
+                                return True
+
+                            if (left_extent1 <= existing["start"] and feature_start >= existing["start"]) and \
+                               abs(feature_start - existing["start"]) < max(name_width, existing_name_width) + label_padding:
+                                return True
+
+                    return False
+
+                for feature in feature_info:
+                    assigned = False
+                    for i, track in enumerate(tracks_list):
+                        if not overlaps_with_track(feature, track):
+                            track.append(feature)
+                            track_assignments[feature["name"]] = i
+                            assigned = True
+                            break
+                    if not assigned:
+                        tracks_list.append([feature])
+                        track_assignments[feature["name"]] = len(tracks_list) - 1
+
+                num_gene_tracks = len(tracks_list)
+                track_height = 0.2
+                exon_height = 0.4 * track_height
+                cds_height = 0.8 * track_height
+                track_spacing = 0.5
+
+                max_tracks_to_show = num_gene_tracks if num_gene_tracks > 0 else 1
+                ax_gene.set_ylim(-0.2, max_tracks_to_show * track_spacing)
+
+                if num_gene_tracks > 0:
+                    for feature in feature_info:
+                        feature_name = feature["name"]
+                        feature_data = feature["data"]
+                        feature_start = feature["start"]
+                        feature_end = feature["end"]
+                        strand = feature["strand"]
+
+                        y_pos = track_assignments[feature_name] * track_spacing
+
+                        ax_gene.plot(
+                            [max(self.start, feature_start), min(self.end, feature_end)],
+                            [y_pos, y_pos],
+                            "k-",
+                            linewidth=1,
+                        )
+
+                        exons = feature_data[feature_data["Feature"] == "exon"]
+                        for _, exon in exons.iterrows():
+                            exon_start = max(self.start, exon["Start"])
+                            exon_end = min(self.end, exon["End"])
+                            if exon_start < exon_end:
+                                rect = plt.Rectangle(
+                                    (exon_start, y_pos - exon_height / 2),
+                                    exon_end - exon_start,
+                                    exon_height,
+                                    facecolor="grey",
+                                    alpha=1,
+                                    linewidth=1,
+                                    edgecolor="grey",
+                                )
+                                ax_gene.add_patch(rect)
+
+                        cds = feature_data[feature_data["Feature"] == "CDS"]
+                        for _, cds_region in cds.iterrows():
+                            cds_start = max(self.start, cds_region["Start"])
+                            cds_end = min(self.end, cds_region["End"])
+                            if cds_start < cds_end:
+                                rect = plt.Rectangle(
+                                    (cds_start, y_pos - cds_height / 2),
+                                    cds_end - cds_start,
+                                    cds_height,
+                                    facecolor="grey",
+                                    alpha=1,
+                                    linewidth=1,
+                                    edgecolor="grey",
+                                )
+                                ax_gene.add_patch(rect)
+
+                        # Add strand direction markers
+                        num_arrows = min(
+                            8,
+                            max(3, int((feature_end - feature_start) / ((self.end - self.start) / 40))),
+                        )
+                        visible_feature_start = max(self.start, feature_start)
+                        visible_feature_end = min(self.end, feature_end)
+                        arrow_positions = np.linspace(visible_feature_start, visible_feature_end, num_arrows)
+                        arrow_size = (self.end - self.start) * 0.005
+
+                        for pos in arrow_positions[:-1]:
+                            if strand == "+":
+                                ax_gene.plot([pos, pos + arrow_size], [y_pos + track_height / 8, y_pos], "k-", linewidth=1)
+                                ax_gene.plot([pos, pos + arrow_size], [y_pos - track_height / 8, y_pos], "k-", linewidth=1)
+                            else:
+                                ax_gene.plot([pos, pos - arrow_size], [y_pos + track_height / 8, y_pos], "k-", linewidth=1)
+                                ax_gene.plot([pos, pos - arrow_size], [y_pos - track_height / 8, y_pos], "k-", linewidth=1)
+
+                        # Add gene name label
+                        if feature_start < self.start:
+                            label_x = min(self.end, feature_end) + (self.end - self.start) * 0.01
+                            ha = "left"
+                        else:
+                            label_x = feature_start - (self.end - self.start) * 0.01
+                            ha = "right"
+
+                        ax_gene.text(
+                            label_x,
+                            y_pos,
+                            feature_name,
+                            fontsize=8,
+                            ha=ha,
+                            va="center",
+                            color="black",
+                        )
+
+            ax_gene.set_yticks([])
+            ax_gene.set_ylabel("")
+            ax_gene.set_xlabel("")
+            ax_gene.set_xticks([])
+            ax_gene.spines["top"].set_visible(False)
+            ax_gene.spines["right"].set_visible(False)
+            ax_gene.spines["bottom"].set_visible(False)
+            ax_gene.spines["left"].set_visible(False)
+
+        fig.text(
+            0.5,
+            1,
+            f"[{self.assembly}] {self.chrom}:{self.start}-{self.end}",
+            ha="center",
+        )
+
+        plt.tight_layout()
+        # Adjust left margin to prevent label cropping
+        plt.subplots_adjust(left=0.2)
+        if out_file is not None:
+            plt.savefig(out_file, bbox_inches="tight")
+        else:
+            plt.show()
+
+        return fig, axes
 
     def get_local_iqr_peak(
         self, label, min_length=100, merge_length=100, iqr_factor=1.2

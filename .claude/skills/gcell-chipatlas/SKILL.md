@@ -358,9 +358,96 @@ for ct in cell_types:
     print(f"{ct}: {len(exps)} experiments")
 ```
 
-## Track Visualization (Integration with gcell.dna.Track)
+## Track Visualization
 
 ChIP-Atlas integrates with gcell's Track class for BigWig visualization.
+
+```python
+from gcell.dna.track import Track
+```
+
+The Track class provides three plotting methods:
+- `plot_tracks()` - Basic track visualization
+- `plot_tracks_with_motif_density()` - Tracks with motif annotations
+- `plot_tracks_with_genebody()` - Tracks with detailed gene structure visualization
+
+### Manual Track Construction from BigWig
+
+The most flexible approach is to manually load BigWig data and construct a Track object:
+
+```python
+from gcell.epigenome import ChipAtlas
+from gcell.dna.track import Track  # Basic Track class
+import pyBigWig
+import numpy as np
+
+ca = ChipAtlas()
+
+# Download BigWig file
+exp_id = "SRX3322103"
+bw_path = ca.download_bigwig(exp_id)
+
+# Load data from BigWig
+bw = pyBigWig.open(str(bw_path))
+values = bw.values("chr5", 1293068, 1297068)
+values = np.nan_to_num(np.array(values), nan=0)
+bw.close()
+
+# Create Track object - tracks parameter is a dict of {name: array}
+track = Track(
+    chrom="chr5",
+    start=1293068,
+    end=1297068,
+    assembly="hg38",
+    tracks={"CTCF_Epithelial": values},  # Can add multiple tracks
+    conv_size=50  # Smoothing window size
+)
+
+# Plot
+track.plot_tracks(out_file="output.png")
+```
+
+### Multiple Tracks from Different Experiments
+
+```python
+from gcell.epigenome import ChipAtlas
+from gcell.dna.track import Track
+import pyBigWig
+import numpy as np
+
+ca = ChipAtlas()
+
+# Define region
+chrom, start, end = "chr5", 1293068, 1297068
+
+# Load multiple experiments
+experiments = {
+    "SRX3322103": "Prostate_Epithelial",
+    "SRX10142196": "Mammary_Epithelial_1",
+    "SRX10142197": "Mammary_Epithelial_2",
+}
+
+tracks_dict = {}
+for exp_id, name in experiments.items():
+    bw_path = ca.download_bigwig(exp_id)
+    bw = pyBigWig.open(str(bw_path))
+    values = bw.values(chrom, start, end)
+    values = np.nan_to_num(np.array(values), nan=0)
+    bw.close()
+    tracks_dict[name] = values
+
+# Create multi-track visualization
+track = Track(
+    chrom=chrom,
+    start=start,
+    end=end,
+    assembly="hg38",
+    tracks=tracks_dict,
+    conv_size=50
+)
+
+track.plot_tracks(out_file="multi_tracks.png")
+```
 
 ### Stream BigWig Data
 
@@ -437,24 +524,48 @@ track, fig, axes = compare_celltypes(
 ### Add Gene Annotations
 
 ```python
-from gcell.rna import Gencode
-from gcell.epigenome.chipatlas import experiments_to_track
+from gcell.rna.gencode import Gencode
+from gcell.dna.track import Track
+from gcell.epigenome import ChipAtlas
+import pyBigWig
+import numpy as np
 
 # Load gene annotations
 gencode = Gencode(assembly="hg38")
 
-# Create track
-track = experiments_to_track(
-    experiments,
-    chrom="chr8",
-    start=127735000,
-    end=127745000,
+# Get gene coordinates - note: tss returns a list of TSS objects
+gene = gencode.get_gene("MYC")
+tss_position = gene.tss[0].start  # Get TSS position from first TSS object
+
+# Define region around gene promoter
+chrom = gene.chrom
+start = tss_position - 5000
+end = tss_position + 5000
+
+# Load BigWig data
+ca = ChipAtlas()
+exp_id = "SRX190161"
+bw_path = ca.download_bigwig(exp_id)
+bw = pyBigWig.open(str(bw_path))
+values = bw.values(chrom, start, end)
+values = np.nan_to_num(np.array(values), nan=0)
+bw.close()
+
+# Create Track object
+track = Track(
+    chrom=chrom,
+    start=start,
+    end=end,
+    assembly="hg38",
+    tracks={"H3K27ac": values},
+    conv_size=50
 )
 
-# Plot with gene track
+# Plot with gene body annotations
 track.plot_tracks_with_genebody(
     gene_annot=gencode,
     genes_to_highlight=["MYC"],
+    out_file="tracks_with_genes.png"
 )
 ```
 
