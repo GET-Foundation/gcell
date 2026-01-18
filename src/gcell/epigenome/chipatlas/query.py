@@ -25,6 +25,8 @@ from gcell.epigenome.chipatlas.metadata import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    import numpy as np
+
 # Threshold values for peak calling (Q-value thresholds)
 THRESHOLD_MAP = {
     5: "05",  # Q < 1E-05
@@ -177,28 +179,28 @@ class ChipAtlas:
         Directory for caching downloaded files. Default is the gcell cache.
     metadata_mode : {"full", "lite"}, optional
         Mode for metadata caching:
-        - "full": Download complete metadata (~500MB). Slower first-time setup
-          but comprehensive coverage of all experiments. Default.
         - "lite": Download partial metadata (~1MB). Quick setup for exploration
-          but limited to ~5000 experiments per table.
+          but limited to ~5000 experiments per table. Default.
+        - "full": Download complete metadata (~500MB). Slower first-time setup
+          but comprehensive coverage of all experiments.
 
     Examples
     --------
     >>> from gcell.epigenome import ChipAtlas
 
-    Quick exploration with lite mode:
+    Quick exploration with lite mode (default):
 
     >>> # Fast setup for exploration (~1MB download)
-    >>> ca = ChipAtlas(metadata_mode="lite")
+    >>> ca = ChipAtlas()  # or ChipAtlas(metadata_mode="lite")
     >>> antigens = ca.get_antigens(assembly="hg38")
 
-    >>> # Upgrade to full when ready
+    >>> # Upgrade to full when ready for comprehensive queries
     >>> ca.upgrade_metadata()
 
-    Full mode (default) for comprehensive queries:
+    Full mode for comprehensive queries:
 
     >>> # Complete metadata (~500MB, one-time download)
-    >>> ca = ChipAtlas()  # or ChipAtlas(metadata_mode="full")
+    >>> ca = ChipAtlas(metadata_mode="full")
 
     Search for experiments:
 
@@ -238,7 +240,7 @@ class ChipAtlas:
         force_refresh: bool = False,
         max_workers: int = 4,
         cache_dir: str | Path | None = None,
-        metadata_mode: str = "full",
+        metadata_mode: str = "lite",
         max_rows: int | None = None,
     ):
         self.metadata = ChipAtlasMetadata(
@@ -275,6 +277,7 @@ class ChipAtlas:
         title_contains: str | None = None,
         limit: int | None = None,
         as_experiments: bool = False,
+        sort_by_library_size: bool = True,
     ) -> pd.DataFrame | list[ChipAtlasExperiment]:
         """Search for experiments matching criteria.
 
@@ -296,6 +299,9 @@ class ChipAtlas:
             Maximum number of results to return
         as_experiments : bool, optional
             If True, return list of ChipAtlasExperiment objects
+        sort_by_library_size : bool, optional
+            If True (default), sort results by library size descending to prefer
+            experiments with more reads. Library size is extracted from processing_logs.
 
         Returns
         -------
@@ -321,6 +327,7 @@ class ChipAtlas:
             cell_type_class=cell_type_class,
             title_contains=title_contains,
             limit=limit,
+            sort_by_library_size=sort_by_library_size,
         )
 
         if as_experiments:
@@ -829,3 +836,100 @@ class ChipAtlas:
     def is_lite_mode(self) -> bool:
         """Check if using lite mode (partial metadata)."""
         return self.metadata.is_lite_mode()
+
+    def get_signal_at_region(
+        self,
+        experiment_ids: str | Sequence[str],
+        chrom: str,
+        start: int,
+        end: int,
+        assembly: str = "hg38",
+        max_workers: int | None = None,
+    ) -> dict[str, "np.ndarray"]:
+        """Stream BigWig signal for a genomic region (without downloading full files).
+
+        This is the preferred method for querying signal at specific regions as it
+        uses HTTP Range requests to fetch only the needed data, avoiding large downloads.
+
+        Requires pyBigWig compiled with curl support (pyBigWig.remote=1).
+        If remote support is not available, raises RuntimeError with instructions.
+
+        Parameters
+        ----------
+        experiment_ids : str or Sequence[str]
+            Experiment identifier(s) (SRX, ERX, or DRX format)
+        chrom : str
+            Chromosome name (e.g., "chr1", "chr17")
+        start : int
+            Start position (0-based)
+        end : int
+            End position
+        assembly : str
+            Genome assembly. Default is "hg38".
+        max_workers : int, optional
+            Maximum parallel workers for multiple experiments. Default is 4.
+
+        Returns
+        -------
+        dict[str, np.ndarray]
+            Dictionary mapping experiment IDs to signal arrays (1bp resolution)
+
+        Raises
+        ------
+        RuntimeError
+            If pyBigWig lacks remote URL support (pyBigWig.remote=0).
+
+        Examples
+        --------
+        >>> ca = ChipAtlas()
+        >>> # Stream signal for a single experiment
+        >>> signals = ca.get_signal_at_region(
+        ...     "SRX190161",
+        ...     chrom="chr17",
+        ...     start=7675594,
+        ...     end=7681594,  # TP53 promoter
+        ... )
+        >>> print(signals["SRX190161"].shape)
+
+        >>> # Stream multiple experiments in parallel
+        >>> signals = ca.get_signal_at_region(
+        ...     ["SRX190161", "SRX190162", "SRX190163"],
+        ...     chrom="chr17",
+        ...     start=7675594,
+        ...     end=7681594,
+        ... )
+        """
+        import numpy as np
+
+        from gcell.epigenome.chipatlas.track_utils import (
+            _check_remote_support,
+            stream_bigwig_regions_parallel,
+        )
+
+        # Check remote support before attempting to stream
+        if not _check_remote_support():
+            raise RuntimeError(
+                "pyBigWig.remote=0: Remote URL streaming not available. "
+                "To enable streaming, reinstall pyBigWig with curl support:\n"
+                "  1) Install libcurl-dev: apt-get install libcurl4-openssl-dev\n"
+                "  2) Reinstall: pip install --force-reinstall --no-binary pyBigWig pyBigWig\n"
+                "Alternatively, use download_bigwig() to download files first."
+            )
+
+        # Normalize to list
+        if isinstance(experiment_ids, str):
+            experiment_ids = [experiment_ids]
+
+        # Build URLs
+        urls = [
+            f"{BASE_URL}/{assembly}/eachData/bw/{exp_id}.bw"
+            for exp_id in experiment_ids
+        ]
+
+        # Stream in parallel
+        workers = max_workers or self.max_workers
+        signals = stream_bigwig_regions_parallel(
+            urls, chrom, start, end, max_workers=workers
+        )
+
+        return dict(zip(experiment_ids, signals))

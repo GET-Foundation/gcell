@@ -177,11 +177,12 @@ class ChipAtlasMetadata:
         self.max_rows = max_rows
 
         # Check if we need to initialize or upgrade
-        if force_refresh or not self._db_exists():
+        if force_refresh:
             self._initialize_db()
-        elif self._should_upgrade():
-            # User requested full mode but database is lite
-            print("Upgrading metadata from lite to full mode...")
+        elif not self._is_initialized():
+            if self._should_upgrade():
+                # User requested full mode but database is lite
+                print("Upgrading metadata from lite to full mode...")
             self._initialize_db()
 
     def _db_exists(self) -> bool:
@@ -207,13 +208,38 @@ class ChipAtlasMetadata:
             return False
 
     def _should_upgrade(self) -> bool:
-        """Check if we should upgrade from lite to full mode."""
+        """Check if we should upgrade from lite to full mode.
+
+        Returns True only if user requested full mode AND current DB is lite.
+        """
         if self.metadata_mode != "full":
             return False
 
         # Check current mode in database
         current_mode = self._get_stored_mode()
+        # Only upgrade if explicitly lite mode (not if already full or unknown)
         return current_mode == "lite"
+
+    def _is_initialized(self) -> bool:
+        """Check if the database is properly initialized for the requested mode.
+
+        Returns True if:
+        - DB exists with all required tables
+        - Mode matches requested mode (or requested is lite and stored is full)
+        """
+        if not self._db_exists():
+            return False
+
+        stored_mode = self._get_stored_mode()
+        if stored_mode is None:
+            return False
+
+        # If requesting lite, full mode is also acceptable
+        if self.metadata_mode == "lite":
+            return stored_mode in ("lite", "full")
+
+        # If requesting full, only full is acceptable
+        return stored_mode == self.metadata_mode
 
     def _get_stored_mode(self) -> str | None:
         """Get the metadata mode stored in the database."""
@@ -510,6 +536,7 @@ class ChipAtlasMetadata:
         cell_type_class: str | None = None,
         title_contains: str | None = None,
         limit: int | None = None,
+        sort_by_library_size: bool = False,
     ) -> pd.DataFrame:
         """Search for experiments matching criteria.
 
@@ -529,6 +556,9 @@ class ChipAtlasMetadata:
             Search for experiments with title containing this string
         limit : int, optional
             Maximum number of results to return
+        sort_by_library_size : bool, optional
+            If True, sort results by library size (read count) descending.
+            Library size is extracted from processing_logs field.
 
         Returns
         -------
@@ -560,11 +590,21 @@ class ChipAtlasMetadata:
         query = "SELECT * FROM experiments"
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
-        if limit:
-            query += f" LIMIT {limit}"
 
         rows = self._execute_query(query, tuple(params))
-        return pd.DataFrame([dict(row) for row in rows])
+        df = pd.DataFrame([dict(row) for row in rows])
+
+        # Sort by library size if requested
+        if sort_by_library_size and len(df) > 0 and "processing_logs" in df.columns:
+            df["_library_size"] = df["processing_logs"].apply(_extract_library_size)
+            df = df.sort_values("_library_size", ascending=False)
+            df = df.drop(columns=["_library_size"])
+
+        if limit:
+            df = df.head(limit)
+
+        return df
+
 
     def get_antigens(
         self,
@@ -806,3 +846,28 @@ class ChipAtlasMetadata:
             True if in lite mode, False otherwise
         """
         return self._get_stored_mode() == "lite"
+
+
+def _extract_library_size(processing_logs: str | None) -> int:
+    """Extract library size (read count) from processing_logs field.
+
+    The processing_logs field format is: read_count,alignment_rate,dup_rate,...
+
+    Parameters
+    ----------
+    processing_logs : str or None
+        The processing_logs field value
+
+    Returns
+    -------
+    int
+        Library size (read count), or 0 if not parseable
+    """
+    if not processing_logs or not isinstance(processing_logs, str):
+        return 0
+    try:
+        # First value is the read count
+        first_val = processing_logs.split(",")[0]
+        return int(first_val)
+    except (ValueError, IndexError):
+        return 0

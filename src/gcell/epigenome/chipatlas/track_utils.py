@@ -6,6 +6,8 @@ and create Track objects for visualization.
 
 from __future__ import annotations
 
+import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -16,6 +18,22 @@ if TYPE_CHECKING:
     from gcell.dna.track import Track
     from gcell.epigenome.chipatlas.query import ChipAtlasExperiment
 
+# Threshold for auto-selecting streaming vs caching (100kb)
+STREAMING_THRESHOLD_BP = 100_000
+
+
+def _check_remote_support() -> bool:
+    """Check if pyBigWig has remote URL support compiled in.
+
+    Returns
+    -------
+    bool
+        True if remote streaming is supported, False otherwise.
+    """
+    import pyBigWig
+
+    return bool(getattr(pyBigWig, "remote", 0))
+
 
 def stream_bigwig_region(
     url_or_path: str | Path,
@@ -24,6 +42,9 @@ def stream_bigwig_region(
     end: int,
 ) -> np.ndarray:
     """Stream a region from a BigWig file (local or remote URL).
+
+    Uses pyBigWig's HTTP Range request support to fetch only the needed
+    region from remote BigWig files, avoiding full file downloads.
 
     Parameters
     ----------
@@ -39,7 +60,13 @@ def stream_bigwig_region(
     Returns
     -------
     np.ndarray
-        Signal values for the region (1bp resolution)
+        Signal values for the region (1bp resolution).
+        Returns zeros if the file cannot be opened.
+
+    Raises
+    ------
+    RuntimeError
+        If URL streaming is requested but pyBigWig lacks remote support.
 
     Examples
     --------
@@ -49,15 +76,80 @@ def stream_bigwig_region(
     """
     import pyBigWig
 
-    bw = pyBigWig.open(str(url_or_path))
+    path_str = str(url_or_path)
+    is_remote = path_str.startswith(("http://", "https://"))
+
+    # Check remote support for URLs
+    if is_remote and not _check_remote_support():
+        raise RuntimeError(
+            "pyBigWig was compiled without remote URL support (pyBigWig.remote=0). "
+            "To enable streaming, reinstall pyBigWig with curl development headers: "
+            "1) Install libcurl-dev: apt-get install libcurl4-openssl-dev "
+            "2) Reinstall pyBigWig: pip install --force-reinstall --no-binary pyBigWig pyBigWig"
+        )
+
     try:
-        values = bw.values(chrom, start, end)
-        # Replace None/NaN with 0
-        values = np.array(values, dtype=np.float32)
-        values = np.nan_to_num(values, nan=0.0)
-        return values
-    finally:
-        bw.close()
+        bw = pyBigWig.open(path_str)
+        if bw is None:
+            # Return zeros if file cannot be opened
+            return np.zeros(end - start, dtype=np.float32)
+        try:
+            values = bw.values(chrom, start, end)
+            # Replace None/NaN with 0
+            values = np.array(values, dtype=np.float32)
+            values = np.nan_to_num(values, nan=0.0)
+            return values
+        finally:
+            bw.close()
+    except (RuntimeError, OSError):
+        # Return zeros if file cannot be opened (e.g., ERX experiments)
+        return np.zeros(end - start, dtype=np.float32)
+
+
+def stream_bigwig_regions_parallel(
+    urls_or_paths: list[str | Path],
+    chrom: str,
+    start: int,
+    end: int,
+    max_workers: int = 4,
+) -> list[np.ndarray]:
+    """Stream regions from multiple BigWig files in parallel.
+
+    Parameters
+    ----------
+    urls_or_paths : list[str | Path]
+        List of local paths or remote URLs to BigWig files
+    chrom : str
+        Chromosome name
+    start : int
+        Start position
+    end : int
+        End position
+    max_workers : int
+        Maximum number of parallel workers. Default is 4.
+
+    Returns
+    -------
+    list[np.ndarray]
+        List of signal arrays in the same order as input URLs
+    """
+    results = [None] * len(urls_or_paths)
+
+    def fetch_one(idx: int, url_or_path: str | Path) -> tuple[int, np.ndarray]:
+        signal = stream_bigwig_region(url_or_path, chrom, start, end)
+        return idx, signal
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(fetch_one, i, url)
+            for i, url in enumerate(urls_or_paths)
+        ]
+
+        for future in as_completed(futures):
+            idx, signal = future.result()
+            results[idx] = signal
+
+    return results
 
 
 def experiments_to_track(
@@ -66,15 +158,16 @@ def experiments_to_track(
     start: int,
     end: int,
     assembly: str | None = None,
-    use_cache: bool = True,
+    use_cache: bool | None = None,
     labels: list[str] | None = None,
     normalizer=None,
     conv_size: int | None = 50,
+    max_workers: int = 4,
 ) -> Track:
     """Create a Track object from ChIP-Atlas experiments.
 
     Downloads/streams BigWig data for multiple experiments and creates
-    a Track object for visualization.
+    a Track object for visualization. Uses parallel fetching for speed.
 
     Parameters
     ----------
@@ -88,8 +181,11 @@ def experiments_to_track(
         End position
     assembly : str, optional
         Genome assembly. If not provided, uses first experiment's assembly.
-    use_cache : bool
-        If True, download and cache BigWig files. If False, stream directly.
+    use_cache : bool, optional
+        If True, download and cache full BigWig files. If False, stream
+        directly using HTTP Range requests. If None (default), automatically
+        chooses: streaming for regions < 100kb (if pyBigWig.remote=1),
+        otherwise downloads full files.
     labels : list[str], optional
         Custom labels for each experiment. If not provided, uses
         "{antigen}_{cell_type}" format.
@@ -97,6 +193,8 @@ def experiments_to_track(
         Normalizer object to apply to tracks
     conv_size : int, optional
         Convolution window size. Default is 50.
+    max_workers : int
+        Maximum number of parallel workers for fetching. Default is 4.
 
     Returns
     -------
@@ -133,27 +231,60 @@ def experiments_to_track(
     if assembly is None:
         assembly = experiments[0].assembly
 
-    # Build track data
-    tracks = {}
+    # Check if remote streaming is supported
+    has_remote = _check_remote_support()
+
+    # Auto-select streaming vs caching based on region size and remote support
+    region_size = end - start
+    if use_cache is None:
+        if not has_remote:
+            # No remote support, must download
+            use_cache = True
+            warnings.warn(
+                "pyBigWig.remote=0: Remote streaming not available. "
+                "Downloading full BigWig files instead. "
+                "To enable streaming, reinstall pyBigWig with curl support.",
+                stacklevel=2,
+            )
+        else:
+            # Use streaming for small regions (faster), caching for large regions
+            use_cache = region_size > STREAMING_THRESHOLD_BP
+    elif not use_cache and not has_remote:
+        # User explicitly requested streaming but it's not available
+        warnings.warn(
+            "pyBigWig.remote=0: Cannot stream from URLs. "
+            "Falling back to downloading full BigWig files. "
+            "To enable streaming, reinstall pyBigWig with curl support.",
+            stacklevel=2,
+        )
+        use_cache = True
+
+    # Generate labels
+    exp_labels = []
     for i, exp in enumerate(experiments):
-        # Generate label
         if labels and i < len(labels):
             label = labels[i]
         else:
             label = f"{exp.antigen}_{exp.cell_type}"
             if not label.strip("_"):
                 label = exp.experiment_id
+        exp_labels.append(label)
 
-        # Get BigWig data
-        if use_cache:
-            # Download and cache
-            bw_path = exp.get_bigwig_path(cache=True)
-            signal = stream_bigwig_region(bw_path, chrom, start, end)
-        else:
-            # Stream directly from URL
-            signal = stream_bigwig_region(exp.bigwig_url, chrom, start, end)
+    # Get URLs or paths for all experiments
+    if use_cache:
+        # Download and cache files first (uses existing batch download if available)
+        urls_or_paths = [exp.get_bigwig_path(cache=True) for exp in experiments]
+    else:
+        # Use remote URLs for streaming
+        urls_or_paths = [exp.bigwig_url for exp in experiments]
 
-        tracks[label] = signal
+    # Fetch all signals in parallel
+    signals = stream_bigwig_regions_parallel(
+        urls_or_paths, chrom, start, end, max_workers=max_workers
+    )
+
+    # Build tracks dict
+    tracks = dict(zip(exp_labels, signals))
 
     return Track(
         chrom=chrom,

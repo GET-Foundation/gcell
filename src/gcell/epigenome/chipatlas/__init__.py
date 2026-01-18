@@ -25,11 +25,13 @@ from gcell.epigenome.chipatlas.enrichment import (
 )
 from gcell.epigenome.chipatlas.query import ChipAtlas, ChipAtlasExperiment
 from gcell.epigenome.chipatlas.track_utils import (
+    STREAMING_THRESHOLD_BP,
     compare_celltypes,
     experiments_to_track,
     peaks_to_bed_track,
     search_and_plot,
     stream_bigwig_region,
+    stream_bigwig_regions_parallel,
 )
 
 __all__ = [
@@ -39,8 +41,10 @@ __all__ = [
     "EnrichmentResult",
     # Track utilities
     "stream_bigwig_region",
+    "stream_bigwig_regions_parallel",
     "experiments_to_track",
     "search_and_plot",
     "compare_celltypes",
     "peaks_to_bed_track",
+    "STREAMING_THRESHOLD_BP",
 ]

@@ -8,6 +8,8 @@ description: |
   - Transcript information
   - Querying genes by genomic region
   Triggers: gene annotation, GENCODE, TSS, transcription start site, gene coordinates, transcript, GTF
+refs:
+  - _refs/gencode-gene-api.md
 ---
 
 # Gene Annotations
@@ -18,64 +20,67 @@ description: |
 from gcell.rna.gencode import Gencode
 
 # Load annotations for specific genome
-gc = Gencode('hg38')  # Human GRCh38
-gc = Gencode('hg19')  # Human GRCh37
-gc = Gencode('mm10')  # Mouse mm10
+gencode = Gencode(assembly="hg38")  # Human GRCh38
+gencode = Gencode(assembly="hg19")  # Human GRCh37
+gencode = Gencode(assembly="mm10")  # Mouse mm10
 ```
 
 ## Accessing Gene Information
 
 ```python
 # Get gene by symbol
-gene = gc.genes['TP53']
-gene = gc.genes['BRCA1']
-gene = gc.genes['MYC']
+gene = gencode.get_gene("TP53")
+gene = gencode.get_gene("BRCA1")
+gene = gencode.get_gene("MYC")
 
 # Gene attributes
-print(gene.gene_id)      # Ensembl ID
-print(gene.gene_name)    # Symbol
-print(gene.chrom)        # Chromosome
-print(gene.start)        # Start coordinate
-print(gene.end)          # End coordinate
-print(gene.strand)       # + or -
-print(gene.gene_type)    # protein_coding, lncRNA, etc.
+print(gene.id)         # Ensembl ID: "ENSG00000141510"
+print(gene.name)       # Symbol: "TP53"
+print(gene.chrom)      # Chromosome: "chr17"
+print(gene.strand)     # Strand: "-"
+
+# Gene coordinates
+print(gene.tss_coordinate)  # Primary TSS coordinate
+print(gene.tes)             # Primary TES coordinate
+
+# Full gene body
+chrom, start, end, strand = gene.genomic_range
 ```
 
 ## Transcription Start Sites (TSS)
 
 ```python
-# Get primary TSS
-tss = gene.tss
+# Get list of TSS objects (one per transcript)
+for tss in gene.tss:
+    print(tss.chrom, tss.start, tss.strand)
 
-# Get all TSS for a gene (from all transcripts)
-tss_list = gene.get_all_tss()
+# Get primary TSS coordinate
+tss_coord = gene.tss_coordinate
 
-# TSS object attributes
-for tss in tss_list:
-    print(tss.chrom, tss.position, tss.strand)
+# Access TSS DataFrame for detailed info
+print(gene.tss_list)  # DataFrame with Chromosome, Start, End, Strand, gene_name, gene_id
 ```
 
 ## Query Genes by Region
 
 ```python
-# Find all genes in a genomic region
-genes_in_region = gc.query('chr17', 41196312, 41277500)
+# Find genes in a genomic region
+result = gencode.query_region("chr17", 41196312, 41277500)
 
-# Returns list of Gene objects
-for gene in genes_in_region:
-    print(gene.gene_name, gene.start, gene.end)
+# Returns DataFrame with matching genes
+print(result[['gene_name', 'Chromosome', 'Start', 'End', 'Strand']])
 ```
 
-## Transcript Information
+## Gencode Lookup Properties
 
 ```python
-# Get transcripts for a gene
-transcripts = gene.transcripts
-
-for tx in transcripts:
-    print(tx.transcript_id)
-    print(tx.start, tx.end)
-    print(tx.is_canonical)
+# Quick lookups without creating Gene objects
+strand = gencode.gene_to_strand["TP53"]  # "-"
+chrom = gencode.gene_to_chrom["TP53"]    # "chr17"
+tss = gencode.gene_to_tss["TP53"]        # 7687538
+tes = gencode.gene_to_tes["TP53"]        # 7668421
+gene_type = gencode.gene_to_type["TP53"] # "protein_coding"
+gene_id = gencode.gene_to_id["TP53"]     # "ENSG00000141510"
 ```
 
 ## Key Classes
@@ -83,9 +88,9 @@ for tx in transcripts:
 | Class | Purpose |
 |-------|---------|
 | `Gencode` | GENCODE annotation database |
-| `Gene` | Gene with coordinates and metadata |
-| `TSS` | Transcription start site |
-| `Transcript` | Transcript information |
+| `Gene` | Gene with coordinates and TSS/TES |
+| `TSS` | Transcription start site object |
+| `GeneSets` | Collection of Gene objects |
 
 ## Data Location
 

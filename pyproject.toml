@@ -54,6 +54,7 @@ dependencies = [
     "zarr<3",
     "nglview<4",
     "py3Dmol",
+    "ruff>=0.14.13",
 ]
 dynamic = ["version"]
 
