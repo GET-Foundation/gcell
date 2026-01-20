@@ -379,63 +379,6 @@ class Track:
         else:
             plt.show()
 
-    def plot_tracks_with_motif_density(
-        self,
-        motif_zarr_path,
-        cutoff_quantile=0.99,
-        conv_size=100,
-        motif_index=None,
-        **kwargs,
-    ):
-        """
-        Plot tracks with motif density.
-
-        Parameters
-        ----------
-        motif_zarr_path : str
-            The path to the motif Zarr file.
-        cutoff_quantile : float, optional
-            The quantile to cutoff the motif density. Defaults to 0.99.
-        conv_size : int, optional
-            The size of the convolution window. Defaults to 100.
-        motif_index : int, optional
-            The index of the motif to plot. Defaults to None.
-        cutoff_quantile : float, optional
-            The quantile to cutoff the motif density. Defaults to 0.99.
-        conv_size : int, optional
-            The size of the convolution window. Defaults to 100.
-        """
-        # Get motif density
-        try:
-            from caesar.io.zarr_io import DenseZarrIO
-        except ImportError:
-            "caesar is not installed, this function is not available"
-            return
-        m = DenseZarrIO(motif_zarr_path)
-        motif_density = m.get_track(self.chrom, self.start, self.end)
-        for i, quantile in enumerate(
-            np.quantile(motif_density, cutoff_quantile, axis=0)
-        ):
-            motif_density[:, i][motif_density[:, i] < quantile] = quantile
-            motif_density[:, i] = motif_density[:, i] - quantile
-        if motif_index is not None:
-            motif_density = motif_density[:, motif_index]
-        else:
-            motif_density = motif_density.sum(axis=1)
-
-        # Convolve motif density
-        motif_density = np.convolve(
-            motif_density, np.ones((conv_size,)) / conv_size, mode="same"
-        )
-
-        # Add motif density to tracks
-        self.convoluted_tracks["motif_density"] = (
-            motif_density / motif_density.max() * self.convoluted_tracks_agg.max()
-        )
-
-        # Plot tracks with motif density
-        self.plot_tracks(**kwargs)
-
     def plot_tracks_with_genebody(
         self,
         color_dict=None,
