@@ -1040,7 +1040,7 @@ class Celltype:
             )
             if "gene_by_motif" in self._zarr_data:
                 self._gene_by_motif = pd.DataFrame(
-                    self._zarr_data["gene_by_motif"], columns=self.features
+                    np.array(self._zarr_data["gene_by_motif"]), columns=self.features
                 )
             else:
                 jacobs = []
@@ -1081,7 +1081,7 @@ class Celltype:
             ):
                 if "gene_by_motif_corr" in self._zarr_data:
                     self._gene_by_motif.corr = pd.DataFrame(
-                        self._zarr_data["gene_by_motif_corr"],
+                        np.array(self._zarr_data["gene_by_motif_corr"]),
                         columns=self.features,
                         index=self.features,
                     )
@@ -2174,7 +2174,7 @@ Note that not all celltypes have observed expression. In those cases, the observ
 You can use `available_celltypes` to see which celltypes are available, and `load_celltype` to load a celltype.
               """)
         self.cfg = load_config("s3_interpret")
-        self.s3_file_sys = s3fs.S3FileSystem(anon=True)
+        self.s3_file_sys = s3fs.S3FileSystem(requester_pays=True)
         self.cfg.celltype.data_dir = (
             f"{self.cfg.s3_uri}/pretrain_human_bingren_shendure_apr2023/fetal_adult/"
         )

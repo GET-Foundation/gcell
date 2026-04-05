@@ -32,7 +32,7 @@ class GradioLoggerAdapter(logging.LoggerAdapter):
             ValueError: If not running in a Gradio context
         """
         self.logger.error(msg, *args, **kwargs)
-        if GRADIO_AVAILABLE and gr.get_state() is not None:
+        if GRADIO_AVAILABLE and hasattr(gr, 'get_state') and gr.get_state() is not None:
             raise gr.Error(msg)
         raise ValueError(msg)
 
