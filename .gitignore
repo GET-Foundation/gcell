@@ -48,3 +48,6 @@ Thumbs.db
 
 examples
 _version.py
+
+# Astro agent directory
+.astro/

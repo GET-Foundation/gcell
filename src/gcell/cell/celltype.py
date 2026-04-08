@@ -2174,7 +2174,11 @@ Note that not all celltypes have observed expression. In those cases, the observ
 You can use `available_celltypes` to see which celltypes are available, and `load_celltype` to load a celltype.
               """)
         self.cfg = load_config("s3_interpret")
-        self.s3_file_sys = s3fs.S3FileSystem(requester_pays=True)
+        import os
+        _s3_kwargs = {"requester_pays": True}
+        if os.environ.get("AWS_PROFILE"):
+            _s3_kwargs["profile"] = os.environ["AWS_PROFILE"]
+        self.s3_file_sys = s3fs.S3FileSystem(**_s3_kwargs)
         self.cfg.celltype.data_dir = (
             f"{self.cfg.s3_uri}/pretrain_human_bingren_shendure_apr2023/fetal_adult/"
         )
