@@ -45,6 +45,7 @@ Dependencies:
 """
 
 import gzip
+import os
 import pickle
 import zipfile
 from pathlib import Path
@@ -180,7 +181,14 @@ class ProteinData:
 
     def _initialize_schema(self):
         """Initialize UniProt XML schema"""
-        self._schema = xmlschema.XMLSchema("http://www.uniprot.org/docs/uniprot.xsd")
+        schema_path = os.environ.get("GCELL_UNIPROT_XSD")
+        if schema_path is None:
+            bundled_schema = Path(__file__).with_name("uniprot.xsd")
+            if bundled_schema.exists():
+                schema_path = str(bundled_schema)
+        self._schema = xmlschema.XMLSchema(
+            schema_path or "http://www.uniprot.org/docs/uniprot.xsd"
+        )
 
     def _initialize_seq(self):
         """
