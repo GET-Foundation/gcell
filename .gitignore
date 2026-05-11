@@ -51,3 +51,6 @@ _version.py
 
 # Astro agent directory
 .astro/
+
+# Claude local settings
+.claude/settings.local.json

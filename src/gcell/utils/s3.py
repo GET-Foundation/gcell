@@ -1,9 +1,33 @@
+import os
 from pathlib import Path
 
 import numpy as np
 import s3fs
 import zarr
 from scipy.sparse import load_npz
+
+
+def get_requester_pays_kwargs():
+    """S3FileSystem kwargs for the requester-pays get_demo bucket.
+
+    Callers must be authenticated (SSO or env creds); anonymous access is
+    rejected by the bucket even with RequestPayer set.
+    """
+    kwargs: dict = {"requester_pays": True}
+    profile = os.environ.get("AWS_PROFILE")
+    if profile:
+        kwargs["profile"] = profile
+    return kwargs
+
+
+def is_s3_path(file_path):
+    s = str(file_path)
+    return s.startswith("s3://") or s.startswith("s3:/")
+
+
+def storage_options_for(file_path):
+    """Pandas `storage_options` for a path: requester-pays kwargs for s3, else {}."""
+    return get_requester_pays_kwargs() if is_s3_path(file_path) else {}
 
 
 def fix_s3_path_slash(file_path):

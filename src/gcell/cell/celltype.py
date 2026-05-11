@@ -39,10 +39,12 @@ from ..rna.gene import TSS
 from ..utils.causal_lib import get_subnet, plotly_networkx_digraph, preprocess_net
 from ..utils.lingam import LiNGAM
 from ..utils.s3 import (
+    get_requester_pays_kwargs,
     load_np_with_s3,
     load_npz_with_s3,
     load_zarr_with_s3,
     path_exists_with_s3,
+    storage_options_for,
 )
 
 motif = NrMotifV1.load_from_pickle()
@@ -637,8 +639,11 @@ class Celltype:
             self.gene_feather_path = (
                 f"{self.interpret_dir}/{celltype}.gene_idx_dict.feather"
             )
+        _peak_annot_path = self.data_dir + celltype + ".csv"
         self.peak_annot = pd.read_csv(
-            self.data_dir + celltype + ".csv", sep=","
+            _peak_annot_path,
+            sep=",",
+            storage_options=storage_options_for(_peak_annot_path) or None,
         ).rename(columns={"Unnamed: 0": "index"})
         self.gene_annot = self.load_gene_annot()
         tss_idx = self.gene_annot.level_0.values
@@ -817,7 +822,10 @@ class Celltype:
             gene_annot = exp
         else:
             print("Gene exp feather found. Loading...")
-            gene_annot = pd.read_feather(self.gene_feather_path)
+            gene_annot = pd.read_feather(
+                self.gene_feather_path,
+                storage_options=storage_options_for(self.gene_feather_path) or None,
+            )
             gene_annot["Strand"] = gene_annot["Strand"].apply(
                 lambda x: 0 if x == "+" else 1
             )
@@ -1057,8 +1065,10 @@ class Celltype:
             f"{self.interpret_dir}/{self.celltype}_gene_by_motif.feather",
             s3_file_sys=self.s3_file_sys,
         ):
+            _gbm_path = f"{self.interpret_dir}/{self.celltype}_gene_by_motif.feather"
             self._gene_by_motif = pd.read_feather(
-                f"{self.interpret_dir}/{self.celltype}_gene_by_motif.feather"
+                _gbm_path,
+                storage_options=storage_options_for(_gbm_path) or None,
             ).set_index("index")
         else:
             jacobs = []
@@ -2174,11 +2184,7 @@ Note that not all celltypes have observed expression. In those cases, the observ
 You can use `available_celltypes` to see which celltypes are available, and `load_celltype` to load a celltype.
               """)
         self.cfg = load_config("s3_interpret")
-        import os
-        _s3_kwargs = {"requester_pays": True}
-        if os.environ.get("AWS_PROFILE"):
-            _s3_kwargs["profile"] = os.environ["AWS_PROFILE"]
-        self.s3_file_sys = s3fs.S3FileSystem(**_s3_kwargs)
+        self.s3_file_sys = s3fs.S3FileSystem(**get_requester_pays_kwargs())
         self.cfg.celltype.data_dir = (
             f"{self.cfg.s3_uri}/pretrain_human_bingren_shendure_apr2023/fetal_adult/"
         )
@@ -2189,9 +2195,13 @@ You can use `available_celltypes` to see which celltypes are available, and `loa
             f"{self.cfg.s3_uri}/interpret_natac/motif-clustering/"
         )
         self.cfg.celltype.assets_dir = f"{self.cfg.s3_uri}/assets/"
-        cell_type_annot = pd.read_csv(
+        _annot_path = (
             self.cfg.celltype.data_dir.split("fetal_adult")[0]
             + "data/cell_type_pretrain_human_bingren_shendure_apr2023.txt"
+        )
+        cell_type_annot = pd.read_csv(
+            _annot_path,
+            storage_options=storage_options_for(_annot_path) or None,
         )
         self.cell_type_id_to_name = dict(
             zip(cell_type_annot["id"], cell_type_annot["celltype"])
